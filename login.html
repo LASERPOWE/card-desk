@@ -140,8 +140,10 @@ function googleSignIn(){
   if(!G_TC)G_TC=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:"https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile",callback:async function(r){
     if(!r||r.error){gmsg("Google sign-in cancelled.","err");return;}
     try{const u=await fetch("https://www.googleapis.com/oauth2/v3/userinfo",{headers:{Authorization:"Bearer "+r.access_token}}).then(x=>x.json());
-      if(SIGNUP_URL)fetch(SIGNUP_URL,{method:"POST",mode:"no-cors",body:JSON.stringify({type:"google-signup",name:u.name||"",email:u.email||""})}).catch(function(){});
-      gmsg("✓ Signed in with Google as "+(u.name||u.email),"ok");
+      gmsg("Signing you in as "+(u.name||u.email)+"…","ok");
+      const lr=await fetch("/api/google-login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({access_token:r.access_token})});
+      if(lr.ok){gmsg("✓ Signed in — opening your directory…","ok");location.href="/";}
+      else{gmsg("Signed in with Google, but sign-in to the app failed. Try again.","err");}
     }catch(e){gmsg("Couldn't complete Google sign-in.","err");}
   }});
   G_TC.requestAccessToken();}

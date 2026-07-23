@@ -16,6 +16,7 @@ import shutil
 import time
 from datetime import datetime, timezone
 
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()  # reads .env (OPENAI_API_KEY) when present
@@ -73,7 +74,7 @@ def startup():
 
 
 # ── Authentication ───────────────────────────────────────────────────────────
-PUBLIC_PATHS = {"/login", "/api/login", "/healthz"}
+PUBLIC_PATHS = {"/login", "/api/login", "/api/google-login", "/healthz"}
 
 
 @app.middleware("http")
@@ -111,6 +112,35 @@ def api_login(body: LoginBody):
     resp = JSONResponse({"ok": True})
     # secure cookie so it works over https on the hosted URL
     resp.set_cookie(auth.COOKIE_NAME, auth.create_token(body.username),
+                    max_age=auth.SESSION_DAYS * 86400, httponly=True,
+                    samesite="lax", secure=True)
+    return resp
+
+
+class GoogleLoginBody(BaseModel):
+    access_token: str = ""
+
+
+@app.post("/api/google-login")
+def api_google_login(body: GoogleLoginBody):
+    """Sign in with Google: verify the access token with Google, then issue
+    the same session cookie the app uses, so the person is actually logged in."""
+    token = (body.access_token or "").strip()
+    if not token:
+        raise HTTPException(401, "Missing Google token")
+    try:
+        r = requests.get("https://www.googleapis.com/oauth2/v3/userinfo",
+                         headers={"Authorization": "Bearer " + token}, timeout=10)
+    except Exception:
+        raise HTTPException(502, "Could not reach Google to verify sign-in")
+    if r.status_code != 200:
+        raise HTTPException(401, "Invalid or expired Google sign-in")
+    info = r.json()
+    email = (info.get("email") or "").strip()
+    if not email:
+        raise HTTPException(401, "Google did not return an email")
+    resp = JSONResponse({"ok": True, "email": email, "name": info.get("name", "")})
+    resp.set_cookie(auth.COOKIE_NAME, auth.create_token(email),
                     max_age=auth.SESSION_DAYS * 86400, httponly=True,
                     samesite="lax", secure=True)
     return resp
