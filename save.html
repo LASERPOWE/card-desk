@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#0c1a45">
+<title>Save Contact — Card Desk</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root{--cobalt:#1c46d6;--deep:#0c1a45;--red:#e8232f;--ink:#0b1540;--muted:#5b6788;--line:#e6ebf5;}
+  *{box-sizing:border-box;margin:0;-webkit-tap-highlight-color:transparent;}
+  body{font-family:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink);
+    background:radial-gradient(1100px 600px at 80% -10%,#22337a 0%,transparent 55%),
+      radial-gradient(800px 500px at -10% 110%,#132a63 0%,transparent 55%),var(--deep);
+    min-height:100vh;display:flex;align-items:flex-start;justify-content:center;padding:20px 16px calc(28px + env(safe-area-inset-bottom));}
+  .card{width:100%;max-width:420px;background:#fff;border-radius:22px;overflow:hidden;
+    box-shadow:0 24px 60px rgba(4,12,40,.45);margin-top:24px;}
+  .top{background:linear-gradient(135deg,var(--cobalt),var(--deep));color:#fff;padding:22px 22px 20px;}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:800;letter-spacing:.06em;font-size:12px;opacity:.9;text-transform:uppercase;}
+  .brand .dot{width:10px;height:10px;border-radius:3px;background:var(--red);}
+  .name{font-size:26px;font-weight:800;margin-top:12px;line-height:1.15;}
+  .role{font-size:15px;opacity:.92;margin-top:5px;}
+  .body{padding:18px 22px 8px;}
+  .row{display:flex;gap:12px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:15px;}
+  .row:last-child{border-bottom:0;}
+  .row .k{color:var(--muted);width:74px;flex:none;font-size:12px;text-transform:uppercase;letter-spacing:.04em;font-weight:700;}
+  .row .v{word-break:break-word;}
+  .row a{color:var(--cobalt);text-decoration:none;}
+  .actions{padding:8px 22px 22px;}
+  .btn{width:100%;border:0;border-radius:14px;padding:16px;font-size:16px;font-weight:800;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:10px;font-family:inherit;}
+  .g{background:#fff;color:#1f2937;border:1.5px solid #dadce0;box-shadow:0 2px 8px rgba(4,12,40,.08);}
+  .g:active{background:#f6f8fc;}
+  .vcf{background:transparent;color:var(--cobalt);margin-top:10px;font-weight:700;font-size:14.5px;}
+  .msg{text-align:center;font-size:14px;font-weight:700;min-height:20px;margin:6px 22px 0;}
+  .ok{color:#0a9d63;} .err{color:#c81e3a;} .dim{color:var(--muted);}
+  .foot{text-align:center;color:#8ea0c9;font-size:11px;letter-spacing:.05em;padding:6px 0 2px;}
+  .skel{color:var(--muted);text-align:center;padding:40px 0;font-size:15px;}
+  .gicon{width:20px;height:20px;flex:none;}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="skel" id="skel">Loading contact…</div>
+</div>
+
+<template id="tpl">
+  <div class="top">
+    <div class="brand"><span class="dot"></span><span>Laser Power &amp; Infra · Card Desk</span></div>
+    <div class="name" data-name></div>
+    <div class="role" data-role></div>
+  </div>
+  <div class="body" data-rows></div>
+  <div class="msg" id="msg">Tap below to save this contact to your Google account.</div>
+  <div class="actions">
+    <button class="btn g" id="save">
+      <svg class="gicon" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.3l7.8 6.1C12.3 13.2 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9.1h12.4c-.5 2.9-2.1 5.3-4.6 7l7.1 5.5c4.2-3.9 6.6-9.6 6.6-16.4z"/><path fill="#FBBC05" d="M10.4 28.6c-.5-1.5-.8-3-.8-4.6s.3-3.1.8-4.6l-7.8-6.1C1 16.4 0 20.1 0 24s1 7.6 2.6 10.7l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.5-2 15.3-5.6l-7.1-5.5c-2 1.4-4.6 2.2-8.2 2.2-6.3 0-11.7-3.7-13.6-9.1l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+      <span>Save to my Google Contacts</span>
+    </button>
+    <button class="btn vcf" id="vcf">Or download contact card (.vcf)</button>
+  </div>
+  <div class="foot">SCAN · SAVE · CONNECT</div>
+</template>
+
+<script>
+const GOOGLE_CLIENT_ID="265969045892-o2da4je472sp3jhuhe4mk5v5skf9772q.apps.googleusercontent.com";
+const ID=(location.pathname.match(/\/c\/(\d+)/)||[])[1];
+let CARD=null,TC=null;
+
+function esc(s){return String(s==null?"":s).replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));}
+function multi(s){return String(s||"").split(/[;,\n]/).map(x=>x.trim()).filter(Boolean);}
+function safeUrl(u){u=String(u||"").trim();if(!u)return"";return /^https?:\/\//i.test(u)?u:"https://"+u;}
+function msg(t,cls){const m=document.getElementById("msg");if(m){m.textContent=t;m.className="msg "+(cls||"dim");}}
+
+async function load(){
+  if(!ID){document.getElementById("skel").textContent="Invalid link.";return;}
+  try{
+    CARD=await fetch("/api/pub/cards/"+ID).then(r=>{if(!r.ok)throw 0;return r.json();});
+    render(CARD);
+  }catch(e){document.getElementById("skel").textContent="Sorry, this contact could not be found.";}
+}
+
+function render(c){
+  const t=document.getElementById("tpl").content.cloneNode(true);
+  t.querySelector("[data-name]").textContent=c.full_name||"Contact";
+  const role=[c.designation,c.company].filter(Boolean).join(c.designation&&c.company?" · ":"");
+  t.querySelector("[data-role]").textContent=role;
+  const rows=t.querySelector("[data-rows]");
+  const add=(k,html)=>{if(!html)return;const r=document.createElement("div");r.className="row";
+    r.innerHTML='<div class="k">'+k+'</div><div class="v">'+html+'</div>';rows.appendChild(r);};
+  multi(c.mobile).forEach(p=>add("Mobile",'<a href="tel:'+esc(p)+'">'+esc(p)+'</a>'));
+  multi(c.office_phones).forEach(p=>add("Office",'<a href="tel:'+esc(p)+'">'+esc(p)+'</a>'));
+  multi(c.emails).forEach(e=>add("Email",'<a href="mailto:'+esc(e)+'">'+esc(e)+'</a>'));
+  multi(c.website).forEach(w=>add("Web",'<a href="'+esc(safeUrl(w))+'" target="_blank" rel="noopener">'+esc(w)+'</a>'));
+  const addr=[c.address,c.city,c.pin_code,c.country].filter(Boolean).join(", ");
+  add("Address",esc(addr));
+  const card=document.getElementById("card");card.innerHTML="";card.appendChild(t);
+  document.getElementById("save").onclick=saveGoogle;
+  document.getElementById("vcf").onclick=saveVcf;
+}
+
+function buildVCard(c){
+  const v=["BEGIN:VCARD","VERSION:3.0"];
+  const nm=(c.full_name||"Contact").trim(),parts=nm.split(/\s+/);
+  const last=parts.length>1?parts.slice(1).join(" "):"",first=parts[0]||nm;
+  v.push("N:"+last+";"+first+";;;");v.push("FN:"+nm);
+  if(c.company)v.push("ORG:"+c.company+(c.department?";"+c.department:""));
+  if(c.designation)v.push("TITLE:"+c.designation);
+  multi(c.mobile).forEach(p=>v.push("TEL;TYPE=CELL:"+p));
+  multi(c.office_phones).forEach(p=>v.push("TEL;TYPE=WORK:"+p));
+  multi(c.emails).forEach(e=>v.push("EMAIL;TYPE=WORK:"+e));
+  multi(c.website).forEach(w=>v.push("URL:"+safeUrl(w)));
+  if(c.linkedin_url)v.push("URL:"+c.linkedin_url);
+  if(c.address||c.city||c.pin_code||c.country)v.push("ADR;TYPE=WORK:;;"+(c.address||"")+";"+(c.city||"")+";;"+(c.pin_code||"")+";"+(c.country||""));
+  v.push("END:VCARD");return v.join("\r\n");
+}
+function saveVcf(){
+  const b=new Blob([buildVCard(CARD)],{type:"text/vcard;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(b);
+  a.download=(CARD.full_name||"contact").replace(/[^a-z0-9]+/gi,"_")+".vcf";
+  document.body.appendChild(a);a.click();a.remove();
+  msg("Contact card downloaded — open it to add.","ok");
+}
+
+function gPerson(c){
+  const nm=(c.full_name||"Contact").trim(),parts=nm.split(/\s+/);
+  const p={names:[{givenName:parts[0]||nm,familyName:parts.length>1?parts.slice(1).join(" "):""}]};
+  if(c.company||c.designation)p.organizations=[{name:c.company||"",title:c.designation||""}];
+  const tel=[];multi(c.mobile).forEach(v=>tel.push({value:v,type:"mobile"}));
+  multi(c.office_phones).forEach(v=>tel.push({value:v,type:"work"}));if(tel.length)p.phoneNumbers=tel;
+  const em=multi(c.emails).map(v=>({value:v,type:"work"}));if(em.length)p.emailAddresses=em;
+  const urls=[];multi(c.website).forEach(w=>urls.push({value:safeUrl(w)}));
+  if(c.linkedin_url)urls.push({value:c.linkedin_url});if(urls.length)p.urls=urls;
+  if(c.address||c.city||c.pin_code||c.country)p.addresses=[{streetAddress:c.address||"",city:c.city||"",postalCode:c.pin_code||"",country:c.country||"",type:"work"}];
+  return p;
+}
+async function onToken(resp){
+  if(!resp||resp.error){msg("Access cancelled.","err");return;}
+  msg("Saving to your Google Contacts…","dim");
+  try{
+    const r=await fetch("https://people.googleapis.com/v1/people:createContact",
+      {method:"POST",headers:{"Authorization":"Bearer "+resp.access_token,"Content-Type":"application/json"},
+       body:JSON.stringify(gPerson(CARD))});
+    if(!r.ok){const t=await r.text();throw new Error("HTTP "+r.status+" "+t.slice(0,120));}
+    msg("✓ Saved to your Google Contacts!","ok");
+    document.getElementById("save").innerHTML="<span>✓ Saved to Google Contacts</span>";
+  }catch(e){msg("Couldn't save automatically — use the .vcf option below.","err");}
+}
+function saveGoogle(){
+  if(!(window.google&&google.accounts&&google.accounts.oauth2)){msg("Google is still loading — try again in a moment.","err");return;}
+  msg("Opening Google…","dim");
+  if(!TC)TC=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:"https://www.googleapis.com/auth/contacts",callback:onToken});
+  TC.requestAccessToken();
+}
+load();
+</script>
+</body>
+</html>

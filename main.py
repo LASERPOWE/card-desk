@@ -75,12 +75,15 @@ def startup():
 
 # ── Authentication ───────────────────────────────────────────────────────────
 PUBLIC_PATHS = {"/login", "/api/login", "/api/google-login", "/healthz"}
+# Prefixes anyone can reach without logging in — the public "scan a QR → save
+# to your own Google Contacts" flow lives here.
+PUBLIC_PREFIXES = ("/c/", "/api/pub/")
 
 
 @app.middleware("http")
 async def require_auth(request: Request, call_next):
     path = request.url.path
-    if not auth.auth_enabled() or path in PUBLIC_PATHS:
+    if not auth.auth_enabled() or path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES):
         return await call_next(request)
     token = request.cookies.get(auth.COOKIE_NAME)
     if auth.verify_token(token):
@@ -162,6 +165,29 @@ def index():
 @app.get("/user")
 def user_page():
     return FileResponse(os.path.join(STATIC_DIR, "user.html"))
+
+
+# ── Public "scan → save to your Google Contacts" flow ─────────────────────────
+_PUB_FIELDS = [
+    "id", "full_name", "designation", "company", "department", "mobile",
+    "office_phones", "emails", "website", "address", "city", "pin_code",
+    "country", "linkedin_url",
+]
+
+
+@app.get("/c/{card_id}")
+def public_card_page(card_id: int):
+    """The page a phone opens after scanning a card's QR — no login required."""
+    return FileResponse(os.path.join(STATIC_DIR, "save.html"))
+
+
+@app.get("/api/pub/cards/{card_id}")
+def public_card_data(card_id: int):
+    """Public, read-only card details for the save page."""
+    card = db.get_card(card_id)
+    if not card:
+        raise HTTPException(404, "Card not found")
+    return {k: card.get(k, "") for k in _PUB_FIELDS}
 
 
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
