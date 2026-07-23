@@ -1,0 +1,25 @@
+# Render Blueprint — deploys Card Desk with a permanent https URL + persistent disk.
+# In Render: New → Blueprint → connect this repo. It reads this file automatically.
+services:
+  - type: web
+    name: card-desk
+    runtime: python
+    plan: starter            # Starter ($7/mo) is required for the persistent disk below.
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    disk:
+      name: card-desk-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DATA_DIR
+        value: /var/data      # cards.db + uploaded images live here and survive restarts
+      - key: PYTHON_VERSION
+        value: 3.12.4
+      - key: OPENAI_API_KEY
+        sync: false            # set this in the Render dashboard (secret)
+      - key: APP_USERNAME
+        value: admin
+      - key: APP_PASSWORD
+        sync: false            # set your login password in the dashboard (secret)
