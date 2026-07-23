@@ -534,6 +534,7 @@ function qrSvg(text){
   let cells="";for(let r=0;r<n;r++)for(let col=0;col<n;col++)if(qr.isDark(r,col))cells+='<rect x="'+(col+m)+'" y="'+(r+m)+'" width="1.02" height="1.02"/>';
   return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 '+sz+' '+sz+'" shape-rendering="crispEdges"><rect width="'+sz+'" height="'+sz+'" fill="#fff"/><g fill="#0b1540">'+cells+'</g></svg>';
 }
+function cardUrl(c){return location.origin+"/c/"+c.id;}
 function slug(s){return String(s||"card").replace(/[^a-z0-9]+/gi,"_").replace(/^_+|_+$/g,"").slice(0,40)||"card";}
 function dlFile(name,text,mime){const b=new Blob([text],{type:mime||"text/plain;charset=utf-8"});const u=URL.createObjectURL(b);const a=el("a");a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);}
 function saveVcf(c){dlFile(slug(c.full_name)+".vcf",buildVCard(c),"text/vcard;charset=utf-8");toast("Contact (.vcf) downloaded","ok");}
@@ -562,7 +563,7 @@ function addToGoogle(c){
   G_PENDING=c;
   if(!G_TOKEN_CLIENT)G_TOKEN_CLIENT=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:"https://www.googleapis.com/auth/contacts",callback:gOnToken});
   toast("Opening Google…","ok");G_TOKEN_CLIENT.requestAccessToken();}
-function dlQrPng(c){const svg=qrSvg(buildVCard(c,true));if(!svg){toast("QR not available","err");return;}
+function dlQrPng(c){const svg=qrSvg(cardUrl(c));if(!svg){toast("QR not available","err");return;}
   const img=new Image();const url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
   img.onload=function(){const s=760,cv=el("canvas");cv.width=s;cv.height=s;const x=cv.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,s,s);x.imageSmoothingEnabled=false;x.drawImage(img,0,0,s,s);URL.revokeObjectURL(url);cv.toBlob(function(b){const u=URL.createObjectURL(b);const a=el("a");a.href=u;a.download=slug(c.full_name)+"_qr.png";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);toast("QR image downloaded","ok");});};
   img.onerror=function(){toast("QR export failed","err");};img.src=url;}
@@ -746,7 +747,7 @@ function openModal(id,startTab){const c=CARDS.find(x=>x.id===id);if(!c)return;MO
   if((c.enrich_sources||"").trim()){cd.appendChild(secH("link","Sources"));const s=el("div","src");appendRich(s,c.enrich_sources);cd.appendChild(s);}
   body.appendChild(cd);
   const qp=el("div","pane");qp.dataset.pane="qr";qp.appendChild(secH("qr","Scan to save contact"));
-  const qwrap=el("div","qrbox");const qcard=el("div","qrcard");const _svg=qrSvg(buildVCard(c,true));
+  const qwrap=el("div","qrbox");const qcard=el("div","qrcard");const _svg=qrSvg(cardUrl(c));
   if(_svg)qcard.innerHTML=_svg;else qcard.appendChild(el("div","rpar","QR unavailable."));
   qwrap.appendChild(qcard);
   const cap=el("div","qrcap");cap.appendChild(el("b",null,c.full_name||"Contact"));const sub=[c.designation,c.company].filter(Boolean).join(" · ");if(sub)cap.appendChild(el("span",null,sub));qwrap.appendChild(cap);qp.appendChild(qwrap);
