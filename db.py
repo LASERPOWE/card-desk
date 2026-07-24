@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS cards (
     summary TEXT DEFAULT '',
     enrich_sources TEXT DEFAULT '',
     enrich_status TEXT DEFAULT 'pending',
-    enrich_attempts INTEGER DEFAULT 0
+    enrich_attempts INTEGER DEFAULT 0,
+    owner_email TEXT DEFAULT ''
 );
 """
 
@@ -76,11 +77,13 @@ def init_db():
         existing = {r[1] for r in conn.execute("PRAGMA table_info(cards)").fetchall()}
         if "summary" not in existing:
             conn.execute("ALTER TABLE cards ADD COLUMN summary TEXT DEFAULT ''")
+        if "owner_email" not in existing:
+            conn.execute("ALTER TABLE cards ADD COLUMN owner_email TEXT DEFAULT ''")
 
 
-def insert_card(created_at, image_file, extraction):
-    cols = ["created_at", "image_file"] + EXTRACT_FIELDS
-    vals = [created_at, image_file] + [str(extraction.get(f, "") or "") for f in EXTRACT_FIELDS]
+def insert_card(created_at, image_file, extraction, owner_email=""):
+    cols = ["created_at", "image_file", "owner_email"] + EXTRACT_FIELDS
+    vals = [created_at, image_file, owner_email or ""] + [str(extraction.get(f, "") or "") for f in EXTRACT_FIELDS]
     placeholders = ",".join("?" * len(cols))
     with get_conn() as conn:
         cur = conn.execute(
@@ -104,9 +107,15 @@ def update_enrichment(card_id, data, status, bump_attempt=True):
         conn.execute("UPDATE cards SET {} WHERE id=?".format(",".join(sets)), vals)
 
 
-def list_cards():
+def list_cards(owner=None):
+    """All cards, or only one owner's cards when owner is given."""
     with get_conn() as conn:
-        rows = conn.execute("SELECT * FROM cards ORDER BY id DESC").fetchall()
+        if owner is None:
+            rows = conn.execute("SELECT * FROM cards ORDER BY id DESC").fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM cards WHERE owner_email=? ORDER BY id DESC", (owner,)
+            ).fetchall()
         return [dict(r) for r in rows]
 
 

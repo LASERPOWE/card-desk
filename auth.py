@@ -60,3 +60,22 @@ def verify_token(token):
         return int(expiry) > time.time()
     except Exception:
         return False
+
+
+def parse_token(token):
+    """Return the identity (username or email) inside a valid token, else None."""
+    if not token or "." not in token:
+        return None
+    b64, sig = token.rsplit(".", 1)
+    try:
+        payload = base64.urlsafe_b64decode(b64.encode()).decode()
+    except Exception:
+        return None
+    expected = hmac.new(_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    try:
+        user, expiry = payload.split("|", 1)
+        return user if int(expiry) > time.time() else None
+    except Exception:
+        return None

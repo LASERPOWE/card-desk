@@ -98,6 +98,25 @@ class LoginBody(BaseModel):
     password: str = ""
 
 
+def _identity(request: Request):
+    """Who is logged in — the admin username or a Google email — else None."""
+    return auth.parse_token(request.cookies.get(auth.COOKIE_NAME))
+
+
+def _is_admin(ident):
+    return bool(ident) and ident == os.environ.get("APP_USERNAME", "admin")
+
+
+@app.get("/api/me")
+def api_me(request: Request):
+    ident = _identity(request)
+    if not ident and not auth.auth_enabled():
+        ident = os.environ.get("APP_USERNAME", "admin")
+    if not ident:
+        raise HTTPException(401, "Not authenticated")
+    return {"identity": ident, "admin": _is_admin(ident)}
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
@@ -196,7 +215,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # ── API ──────────────────────────────────────────────────────────────────────
 @app.post("/api/upload")
-async def upload_cards(background: BackgroundTasks, files: list[UploadFile] = File(...)):
+async def upload_cards(request: Request, background: BackgroundTasks, files: list[UploadFile] = File(...)):
+    owner = _identity(request) or os.environ.get("APP_USERNAME", "admin")
     results = []
     for f in files:
         try:
@@ -219,7 +239,7 @@ async def upload_cards(background: BackgroundTasks, files: list[UploadFile] = Fi
 
             # 3. Insert into SQLite
             card_id = db.insert_card(
-                datetime.now(timezone.utc).isoformat(), fname, extraction)
+                datetime.now(timezone.utc).isoformat(), fname, extraction, owner_email=owner)
 
             # 4. Enrichment in background (slow web research — don't block upload)
             background.add_task(worker.enrich_card_now, card_id)
@@ -234,9 +254,14 @@ async def upload_cards(background: BackgroundTasks, files: list[UploadFile] = Fi
 
 
 @app.get("/api/cards")
-def api_cards():
-    cards = db.list_cards()
+def api_cards(request: Request):
+    ident = _identity(request)
+    if _is_admin(ident) or not auth.auth_enabled():
+        cards = db.list_cards()          # admin sees everyone's cards, with owner
+    else:
+        cards = db.list_cards(owner=ident or "")   # each user sees only their own
     return {"cards": cards, "count": len(cards),
+            "me": ident or "", "admin": _is_admin(ident),
             "generated_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -258,10 +283,13 @@ def api_reenrich(card_id: int, background: BackgroundTasks):
 
 
 @app.delete("/api/cards/{card_id}")
-def api_delete(card_id: int):
+def api_delete(card_id: int, request: Request):
     card = db.get_card(card_id)
     if not card:
         raise HTTPException(404, "Card not found")
+    ident = _identity(request)
+    if auth.auth_enabled() and not _is_admin(ident) and card.get("owner_email") != ident:
+        raise HTTPException(403, "You can only delete your own cards")
     img = os.path.join(UPLOAD_DIR, card["image_file"])
     if os.path.exists(img):
         try:
