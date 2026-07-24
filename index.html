@@ -800,20 +800,34 @@ function sheetToken(cb){const now=Date.now();
 let SHEET_LAST_SIG="",SHEET_LAST_TS=0,SHEET_ID=null;
 async function sheetSyncCore(tok,openAfter,quiet){
   const H={"Authorization":"Bearer "+tok,"Content-Type":"application/json"};
-  const key="cd_sheet_"+(ME||"me");let sid=SHEET_ID;
+  const key="cd_sheet_"+(ME||"me");let sid=SHEET_ID,gid=0;
   try{if(!sid)sid=localStorage.getItem(key);}catch(e){}
-  if(sid){const chk=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"?fields=spreadsheetId",{headers:H});if(!chk.ok)sid=null;}
+  if(sid){const chk=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"?fields=spreadsheetId,sheets.properties",{headers:H});
+    if(!chk.ok)sid=null;else{try{gid=(await chk.json()).sheets[0].properties.sheetId||0;}catch(e){}}}
   if(!sid){
     const title=IS_ADMIN?"Card Desk — MASTER (All Users)":"Card Desk — "+(ME||"My Cards");
     const cr=await fetch("https://sheets.googleapis.com/v4/spreadsheets",{method:"POST",headers:H,body:JSON.stringify({properties:{title:title}})});
     if(!cr.ok)throw new Error("create HTTP "+cr.status);
-    sid=(await cr.json()).spreadsheetId;try{localStorage.setItem(key,sid);}catch(e){}}
+    const cj=await cr.json();sid=cj.spreadsheetId;try{gid=cj.sheets[0].properties.sheetId||0;}catch(e){}
+    try{localStorage.setItem(key,sid);}catch(e){}}
   SHEET_ID=sid;
   const cols=["ID","Owner","Name","Title","Company","Mobile","Office","Email","Website","City","Country","LinkedIn","Other Profiles","Status","Added"];
   const rows=CARDS.map(c=>[c.id,c.owner_email||ME||"",c.full_name||"",c.designation||"",c.company||"",c.mobile||"",c.office_phones||"",c.emails||"",c.website||"",c.city||"",c.country||"",c.linkedin_url||"",String(c.other_web_profiles||"").slice(0,300),c.enrich_status||"",c.created_at||""]);
   await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"/values/A1:Z20000:clear",{method:"POST",headers:H,body:"{}"});
   const up=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"/values/A1?valueInputOption=RAW",{method:"PUT",headers:H,body:JSON.stringify({values:[cols].concat(rows)})});
   if(!up.ok)throw new Error("write HTTP "+up.status);
+  /* Perfect alignment: frozen bold header, fixed column widths, uniform one-line rows */
+  try{
+    const W=[50,190,170,170,190,140,140,210,160,110,95,260,330,95,170];
+    const reqs=[
+      {updateSheetProperties:{properties:{sheetId:gid,gridProperties:{frozenRowCount:1}},fields:"gridProperties.frozenRowCount"}},
+      {repeatCell:{range:{sheetId:gid,startRowIndex:0,endRowIndex:1},cell:{userEnteredFormat:{textFormat:{bold:true,foregroundColor:{red:1,green:1,blue:1}},backgroundColor:{red:0.13,green:0.25,blue:0.63},horizontalAlignment:"CENTER",verticalAlignment:"MIDDLE"}},fields:"userEnteredFormat(textFormat,backgroundColor,horizontalAlignment,verticalAlignment)"}},
+      {repeatCell:{range:{sheetId:gid,startRowIndex:1},cell:{userEnteredFormat:{verticalAlignment:"MIDDLE",wrapStrategy:"CLIP"}},fields:"userEnteredFormat(verticalAlignment,wrapStrategy)"}},
+      {updateDimensionProperties:{range:{sheetId:gid,dimension:"ROWS",startIndex:1,endIndex:rows.length+1},properties:{pixelSize:28},fields:"pixelSize"}}
+    ];
+    W.forEach((px,i)=>reqs.push({updateDimensionProperties:{range:{sheetId:gid,dimension:"COLUMNS",startIndex:i,endIndex:i+1},properties:{pixelSize:px},fields:"pixelSize"}}));
+    await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+":batchUpdate",{method:"POST",headers:H,body:JSON.stringify({requests:reqs})});
+  }catch(e){}
   SHEET_LAST_SIG=sheetSig();SHEET_LAST_TS=Date.now();
   if(!quiet)toast("✓ "+CARDS.length+" card(s) saved to your Google Sheet","ok");
   if(openAfter){const w=window.open("https://docs.google.com/spreadsheets/d/"+sid,"_blank","noopener");

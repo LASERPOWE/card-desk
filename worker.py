@@ -244,6 +244,19 @@ def enrich_card_now(card_id):
         if extra.get("_sources"):
             prev = data.get("enrich_sources", "") or ""
             data["enrich_sources"] = (prev + (" | " if prev else "") + extra["_sources"])[:800]
+        # Sheet should never be empty: when no personal social profile was
+        # verified, fill Other Profiles with company/news/reference links.
+        if not (data.get("other_web_profiles") or "").strip():
+            refs = []
+            for u in (extra.get("_sources") or "").split(" | "):
+                u = u.strip()
+                if u.startswith("http"):
+                    refs.append(u)
+            w = str(card.get("website", "") or "").strip()
+            if w:
+                refs.append(w if w.startswith("http") else "https://" + w)
+            if refs:
+                data["other_web_profiles"] = "\n".join(dict.fromkeys(refs))[:900]
     except Exception:
         log.exception("open_source_lookup failed (continuing)")
 
