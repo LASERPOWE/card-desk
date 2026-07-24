@@ -155,6 +155,10 @@ select#sort option{background:var(--deep);color:#fff}
 .empty .big{width:74px;height:74px;margin:0 auto 16px;border-radius:20px;display:grid;place-items:center;background:var(--glass-2);color:#fff;font-size:1.9rem}
 .empty h3{font-size:1.1rem;color:#fff;margin-bottom:6px;font-weight:700}
 
+.cap-row{display:flex;gap:10px;margin:12px 0 4px}
+.capbtn{flex:1;padding:13px;border-radius:12px;border:1.5px solid rgba(255,255,255,.22);background:rgba(255,255,255,.08);color:#fff;font-weight:700;font-size:.9rem;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-family:inherit;transition:.15s}
+.capbtn:hover{background:rgba(255,255,255,.16)}
+.owner-badge{font-size:.68rem;color:#8ea0c9;margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* upload */
 .panel{max-width:600px;margin:22px auto;border-radius:var(--r-lg);background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(10px);box-shadow:var(--shadow);padding:32px 28px}
 .panel h2{font-family:var(--display);font-size:1.45rem;font-weight:700;text-align:center;color:#fff}
@@ -409,6 +413,11 @@ table.sheet .badge{transform:scale(.9)}
         <p>or drag &amp; drop photos — JPG · PNG · WebP, multiple files</p>
       </div>
       <input type="file" id="fileInput" accept="image/jpeg,image/png,image/webp" multiple onchange="onPick(event)">
+      <input type="file" id="camInput" accept="image/*" capture="environment" style="display:none" onchange="onPick(event)">
+      <div class="cap-row">
+        <button type="button" class="capbtn" onclick="document.getElementById('camInput').click()">📷 Take Photo</button>
+        <button type="button" class="capbtn" onclick="document.getElementById('fileInput').click()">🖼️ Gallery / Files</button>
+      </div>
       <div class="previews" id="previews"></div>
       <button class="btn" id="uplBtn" onclick="startUpload()"><span class="ic" id="i-spark"></span>Extract &amp; Research</button>
       <div class="uplog" id="uplog"></div>
@@ -431,6 +440,7 @@ var qrcode=function(){var t=function(t,r){var e=t,n=g[r],o=null,i=0,a=null,u=[],
 <script>
 "use strict";
 let CARDS=[], FILTER="all", SORTV="new", VIEW="grid", QUERY="", MODAL_TAB="overview";
+let IS_ADMIN=false, ME="", MY_CITY="", MY_CITY_LABEL="";
 const SHEET_WEBHOOK_URL="";  // paste your Apps Script /exec URL to enable "Sync to Sheet"
 const GOOGLE_CLIENT_ID="265969045892-o2da4je472sp3jhuhe4mk5v5skf9772q.apps.googleusercontent.com";   // Google OAuth Client ID for 1-tap "Add to Google Contacts"
 
@@ -563,6 +573,25 @@ function addToGoogle(c){
   G_PENDING=c;
   if(!G_TOKEN_CLIENT)G_TOKEN_CLIENT=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:"https://www.googleapis.com/auth/contacts",callback:gOnToken});
   toast("Opening Google…","ok");G_TOKEN_CLIENT.requestAccessToken();}
+/* ── Auto-save scanned cards to the user's own Google Contacts ── */
+let G_TC2=null,G_TOK=null,G_EXP=0,G_Q=[];
+function gToken(cb){const now=Date.now();
+  try{if(!G_TOK){const s=JSON.parse(sessionStorage.getItem("gtok")||"null");if(s&&s.exp>now){G_TOK=s.t;G_EXP=s.exp;}}}catch(e){}
+  if(G_TOK&&G_EXP>now)return cb(G_TOK);
+  if(!(window.google&&google.accounts&&google.accounts.oauth2)){toast("Google is still loading — contact auto-save skipped","err");return;}
+  if(!G_TC2)G_TC2=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:"https://www.googleapis.com/auth/contacts",callback:function(r){
+    if(!r||r.error){toast("Google access cancelled — contacts not auto-saved","err");G_Q=[];return;}
+    G_TOK=r.access_token;G_EXP=Date.now()+50*60*1000;
+    try{sessionStorage.setItem("gtok",JSON.stringify({t:G_TOK,exp:G_EXP}));}catch(e){}
+    const q=G_Q.slice();G_Q=[];q.forEach(f=>f(G_TOK));}});
+  G_Q.push(cb);G_TC2.requestAccessToken();}
+async function gSaveContact(c,tok){
+  const r=await fetch("https://people.googleapis.com/v1/people:createContact",{method:"POST",headers:{"Authorization":"Bearer "+tok,"Content-Type":"application/json"},body:JSON.stringify(gPerson(c))});
+  if(!r.ok)throw new Error("HTTP "+r.status);}
+function autoSaveIds(ids){if(!ids||!ids.length)return;
+  gToken(async tok=>{let ok=0;
+    for(const id of ids){try{const rr=await fetch("/api/cards/"+id);if(!rr.ok)continue;await gSaveContact(await rr.json(),tok);ok++;}catch(e){}}
+    if(ok)toast("✓ "+ok+" contact(s) auto-saved to your Google Contacts","ok");});}
 function dlQrPng(c){const svg=qrSvg(cardUrl(c));if(!svg){toast("QR not available","err");return;}
   const img=new Image();const url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
   img.onload=function(){const s=760,cv=el("canvas");cv.width=s;cv.height=s;const x=cv.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,s,s);x.imageSmoothingEnabled=false;x.drawImage(img,0,0,s,s);URL.revokeObjectURL(url);cv.toBlob(function(b){const u=URL.createObjectURL(b);const a=el("a");a.href=u;a.download=slug(c.full_name)+"_qr.png";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);toast("QR image downloaded","ok");});};
@@ -623,10 +652,17 @@ function startBar(){const t=document.getElementById("topbar");if(!t)return;clear
     BAR_T=setInterval(()=>{const w=parseFloat(t.style.width)||0;if(w<88)t.style.width=(w+7)+"%";},420);});}
 function doneBar(){const t=document.getElementById("topbar");if(!t)return;clearInterval(BAR_T);
   t.style.width="100%";setTimeout(()=>{t.style.opacity="0";},280);}
+function initGeo(){if(!navigator.geolocation)return;
+  navigator.geolocation.getCurrentPosition(async p=>{
+    try{const r=await fetch("https://api.bigdatacloud.net/data/reverse-geocode-client?latitude="+p.coords.latitude+"&longitude="+p.coords.longitude+"&localityLanguage=en").then(x=>x.json());
+      const city=(r.city||r.locality||"").trim();
+      if(city){MY_CITY=city.toLowerCase();MY_CITY_LABEL=city;renderCards();toast("📍 Showing "+city+" contacts first","ok");}
+    }catch(e){}},function(){},{timeout:8000,maximumAge:600000});}
+setTimeout(initGeo,2500);
 async function loadCards(){startBar();try{const r=await fetch("/api/cards",{headers:{"Accept":"application/json"}});
   const ct=(r.headers.get("content-type")||"");
   if(r.status===401||r.redirected||!ct.includes("application/json")){goLogin();return;}
-  CARDS=(await r.json()).cards||[];renderStats();renderCards();}catch(e){console.error(e);}finally{doneBar();hideBoot();}}
+  const j=await r.json();CARDS=j.cards||[];IS_ADMIN=!!j.admin;ME=j.me||"";renderStats();renderCards();}catch(e){console.error(e);}finally{doneBar();hideBoot();}}
 async function doLogout(){if(REDIRECTING)return;REDIRECTING=true;showBoot("Signing out…");try{await fetch("/api/logout",{method:"POST"});}catch(e){}setTimeout(()=>{location.href="/login";},550);}
 
 function counts(){const c={all:CARDS.length,done:0,pending:0,not_found:0};
@@ -651,6 +687,8 @@ function renderCards(){const grid=document.getElementById("grid");grid.replaceCh
   else if(SORTV==="company")list.sort((a,b)=>String(a.company).localeCompare(b.company));
   else if(SORTV==="status")list.sort((a,b)=>(rank[a.enrich_status]??9)-(rank[b.enrich_status]??9)||b.id-a.id);
   else list.sort((a,b)=>b.id-a.id);
+  if(MY_CITY){const near=list.filter(c=>String(c.city||"").toLowerCase().includes(MY_CITY));
+    const far=list.filter(c=>!String(c.city||"").toLowerCase().includes(MY_CITY));list=near.concat(far);}
   if(!list.length){const e=el("div","empty");const big=el("div","big");big.appendChild(icoSpan(CARDS.length?"search":"cards"));e.appendChild(big);
     e.appendChild(el("h3",null,CARDS.length?"No matches":"No cards yet"));e.appendChild(el("p",null,CARDS.length?"Try a different search or filter.":"Head to Upload to add your first card."));grid.appendChild(e);return;}
   if(VIEW==="sheet"){renderSheet(grid,list);return;}
@@ -659,7 +697,9 @@ function renderCards(){const grid=document.getElementById("grid");grid.replaceCh
     const top=el("div","card-top");top.appendChild(avatarEl(c));
     const nm=el("div");nm.style.minWidth="0";nm.appendChild(el("h3",null,c.full_name||"Unknown"));
     const role=el("div","role");if(c.designation)role.appendChild(el("b",null,c.designation));if(c.designation&&c.company)role.appendChild(document.createTextNode(" · "));if(c.company)role.appendChild(document.createTextNode(c.company));
-    nm.appendChild(role);top.appendChild(nm);card.appendChild(top);
+    nm.appendChild(role);
+    if(IS_ADMIN&&c.owner_email){const ob=el("div","owner-badge");ob.textContent="👤 "+c.owner_email;nm.appendChild(ob);}
+    top.appendChild(nm);card.appendChild(top);
     const sum=cleanSummary(c.summary);
     if(sum)card.appendChild(el("p","summary",sum));
     else if(c.enrich_status==="pending"||c.enrich_status==="failed"){const w=el("p","summary wait");w.appendChild(icoSpan("refresh"));w.appendChild(el("span",null,"Researching…"));card.appendChild(w);}
@@ -786,6 +826,7 @@ async function startUpload(){const log=document.getElementById("uplog"),btn=docu
     for(const res of j.results){if(res.ok){ok++;logLine(log,"ok","✓ "+(res.name||"Card")+(res.company?" — "+res.company:"")+" saved");}else logLine(log,"err","✗ "+(res.file||"?")+": "+res.error);}
     logLine(log,"info",ok+" card(s) saved. Web research runs in the background — details appear in the Directory within 1–2 minutes.");
     UPLOAD_FILES=[];renderPreviews();loadCards();if(ok)toast(ok+" card(s) uploaded","ok");
+    autoSaveIds((j.results||[]).filter(x=>x.ok).map(x=>x.id));
   }catch(e){logLine(log,"err","Server error: "+e);toast("Upload failed","err");}finally{doneBar();btn.disabled=false;}}
 function logLine(box,type,text,reset){if(reset)box.replaceChildren();const li=el("div","li "+type);li.appendChild(icoSpan(type==="err"?"x":type==="ok"?"check":"spark"));li.appendChild(el("span",null,text));box.appendChild(li);}
 
