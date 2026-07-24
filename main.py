@@ -49,19 +49,25 @@ app = FastAPI(title="Card Desk")
 
 
 def _seed_data():
-    """On first boot copy bundled seed data into DATA_DIR so the existing
-    cards + images are present. Never overwrites live data."""
+    """On boot, restore the bundled seed cards (the original directory) when the
+    live DB is missing — so a fresh container never comes up empty. Also restores
+    bundled card images. Never overwrites live data."""
     try:
-        seed_db = os.path.join(SEED_DIR, "cards.db")
+        seed_db = os.path.join(BASE_DIR, "seed_cards.db")
         live_db = os.path.join(DATA_DIR, "cards.db")
         if os.path.exists(seed_db) and not os.path.exists(live_db):
             shutil.copy2(seed_db, live_db)
-            log.info("Seeded database from %s", seed_db)
-        seed_uploads = os.path.join(SEED_DIR, "uploads")
-        if os.path.isdir(seed_uploads) and not os.listdir(UPLOAD_DIR):
-            for f in os.listdir(seed_uploads):
-                shutil.copy2(os.path.join(seed_uploads, f), os.path.join(UPLOAD_DIR, f))
-            log.info("Seeded %s upload images", len(os.listdir(UPLOAD_DIR)))
+            log.info("Restored seed database (original cards)")
+        # Card images bundled at repo root (timestamped filenames) -> uploads dir
+        import glob
+        n = 0
+        for p in glob.glob(os.path.join(BASE_DIR, "1*.jpg")) + glob.glob(os.path.join(BASE_DIR, "1*.png")):
+            dest = os.path.join(UPLOAD_DIR, os.path.basename(p))
+            if not os.path.exists(dest):
+                shutil.copy2(p, dest)
+                n += 1
+        if n:
+            log.info("Restored %s card images", n)
     except Exception:
         log.exception("Seed step failed (continuing)")
 

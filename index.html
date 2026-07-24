@@ -671,7 +671,9 @@ setTimeout(initGeo,2500);
 async function loadCards(){startBar();try{const r=await fetch("/api/cards",{headers:{"Accept":"application/json"}});
   const ct=(r.headers.get("content-type")||"");
   if(r.status===401||r.redirected||!ct.includes("application/json")){goLogin();return;}
-  const j=await r.json();CARDS=j.cards||[];IS_ADMIN=!!j.admin;ME=j.me||"";renderStats();renderCards();}catch(e){console.error(e);}finally{doneBar();hideBoot();}}
+  const j=await r.json();CARDS=j.cards||[];IS_ADMIN=!!j.admin;ME=j.me||"";renderStats();renderCards();
+  try{autoSyncSheet(false);}catch(e){} /* research updates flow into the Sheet too */
+  }catch(e){console.error(e);}finally{doneBar();hideBoot();}}
 async function doLogout(){if(REDIRECTING)return;REDIRECTING=true;showBoot("Signing out…");try{await fetch("/api/logout",{method:"POST"});}catch(e){}setTimeout(()=>{location.href="/login";},550);}
 
 function counts(){const c={all:CARDS.length,done:0,pending:0,not_found:0};
@@ -776,28 +778,46 @@ function sheetToken(cb){const now=Date.now();
     try{sessionStorage.setItem("stok",JSON.stringify({t:S_TOK,exp:S_EXP}));}catch(e){}
     const q=S_Q.slice();S_Q=[];q.forEach(f=>f(S_TOK));}});
   S_Q.push(cb);S_TC.requestAccessToken();}
+let SHEET_LAST_SIG="",SHEET_LAST_TS=0,SHEET_ID=null;
+async function sheetSyncCore(tok,openAfter,quiet){
+  const H={"Authorization":"Bearer "+tok,"Content-Type":"application/json"};
+  const key="cd_sheet_"+(ME||"me");let sid=SHEET_ID;
+  try{if(!sid)sid=localStorage.getItem(key);}catch(e){}
+  if(sid){const chk=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"?fields=spreadsheetId",{headers:H});if(!chk.ok)sid=null;}
+  if(!sid){
+    const title=IS_ADMIN?"Card Desk — MASTER (All Users)":"Card Desk — "+(ME||"My Cards");
+    const cr=await fetch("https://sheets.googleapis.com/v4/spreadsheets",{method:"POST",headers:H,body:JSON.stringify({properties:{title:title}})});
+    if(!cr.ok)throw new Error("create HTTP "+cr.status);
+    sid=(await cr.json()).spreadsheetId;try{localStorage.setItem(key,sid);}catch(e){}}
+  SHEET_ID=sid;
+  const cols=["ID","Owner","Name","Title","Company","Mobile","Office","Email","Website","City","Country","LinkedIn","Other Profiles","Status","Added"];
+  const rows=CARDS.map(c=>[c.id,c.owner_email||ME||"",c.full_name||"",c.designation||"",c.company||"",c.mobile||"",c.office_phones||"",c.emails||"",c.website||"",c.city||"",c.country||"",c.linkedin_url||"",String(c.other_web_profiles||"").slice(0,300),c.enrich_status||"",c.created_at||""]);
+  await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"/values/A1:Z20000:clear",{method:"POST",headers:H,body:"{}"});
+  const up=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"/values/A1?valueInputOption=RAW",{method:"PUT",headers:H,body:JSON.stringify({values:[cols].concat(rows)})});
+  if(!up.ok)throw new Error("write HTTP "+up.status);
+  SHEET_LAST_SIG=sheetSig();SHEET_LAST_TS=Date.now();
+  if(!quiet)toast("✓ "+CARDS.length+" card(s) saved to your Google Sheet","ok");
+  if(openAfter)window.open("https://docs.google.com/spreadsheets/d/"+sid,"_blank","noopener");
+}
+function sheetSig(){return CARDS.map(c=>c.id+":"+c.enrich_status).join(",");}
 async function syncSheet(){
   if(!CARDS.length){toast("No cards to sync yet","err");return;}
-  sheetToken(async tok=>{startBar();toast("Syncing "+CARDS.length+" card(s) to your Google Sheet…","ok");
-    try{
-      const H={"Authorization":"Bearer "+tok,"Content-Type":"application/json"};
-      const key="cd_sheet_"+(ME||"me");let sid=null;
-      try{sid=localStorage.getItem(key);}catch(e){}
-      if(sid){const chk=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"?fields=spreadsheetId",{headers:H});if(!chk.ok)sid=null;}
-      if(!sid){
-        const title="Card Desk — "+(ME||"My Cards");
-        const cr=await fetch("https://sheets.googleapis.com/v4/spreadsheets",{method:"POST",headers:H,body:JSON.stringify({properties:{title:title}})});
-        if(!cr.ok)throw new Error("create HTTP "+cr.status);
-        sid=(await cr.json()).spreadsheetId;try{localStorage.setItem(key,sid);}catch(e){}}
-      const cols=["ID","Name","Title","Company","Mobile","Office","Email","Website","City","Country","LinkedIn","Status","Added"];
-      const rows=CARDS.map(c=>[c.id,c.full_name||"",c.designation||"",c.company||"",c.mobile||"",c.office_phones||"",c.emails||"",c.website||"",c.city||"",c.country||"",c.linkedin_url||"",c.enrich_status||"",c.created_at||""]);
-      await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"/values/A1:Z10000:clear",{method:"POST",headers:H,body:"{}"});
-      const up=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"/values/A1?valueInputOption=RAW",{method:"PUT",headers:H,body:JSON.stringify({values:[cols].concat(rows)})});
-      if(!up.ok)throw new Error("write HTTP "+up.status);
-      toast("✓ "+CARDS.length+" card(s) synced to your Google Sheet","ok");
-      window.open("https://docs.google.com/spreadsheets/d/"+sid,"_blank","noopener");
-    }catch(e){toast("Sheet sync failed: "+e.message,"err");}
+  sheetToken(async tok=>{startBar();
+    try{await sheetSyncCore(tok,true,false);}
+    catch(e){toast("Sheet sync failed: "+e.message,"err");}
     finally{doneBar();}});}
+function autoSyncSheet(force){
+  /* Auto-backup: every scan + every research update lands in the Sheet.
+     Silent when we already hold a Google token; first time asks once. */
+  if(!CARDS.length)return;
+  const sig=sheetSig();
+  if(!force){
+    if(sig===SHEET_LAST_SIG)return;
+    if(Date.now()-SHEET_LAST_TS<90000)return;
+    let cached=false;try{const s=JSON.parse(sessionStorage.getItem("stok")||"null");cached=!!(s&&s.exp>Date.now());}catch(e){}
+    if(!cached&&!S_TOK)return; /* no silent token — wait for a user action */
+  }
+  sheetToken(async tok=>{try{await sheetSyncCore(tok,false,true);}catch(e){}});}
 
 function infoTile(ic,key,val,cp){if(!val)return null;const d=el("div","info");d.appendChild(icoSpan(ic));
   const t=el("div");t.style.minWidth="0";t.appendChild(el("div","k",key));t.appendChild(el("div","v",val));d.appendChild(t);
@@ -872,6 +892,7 @@ async function startUpload(){const log=document.getElementById("uplog"),btn=docu
     logLine(log,"info",ok+" card(s) saved. Web research runs in the background — details appear in the Directory within 1–2 minutes.");
     UPLOAD_FILES=[];renderPreviews();loadCards();if(ok)toast(ok+" card(s) uploaded","ok");
     autoSaveIds((j.results||[]).filter(x=>x.ok).map(x=>x.id));
+    if(ok)setTimeout(()=>autoSyncSheet(true),2500); /* scan → straight into the Sheet */
   }catch(e){logLine(log,"err","Server error: "+e);toast("Upload failed","err");}finally{doneBar();btn.disabled=false;}}
 function logLine(box,type,text,reset){if(reset)box.replaceChildren();const li=el("div","li "+type);li.appendChild(icoSpan(type==="err"?"x":type==="ok"?"check":"spark"));li.appendChild(el("span",null,text));box.appendChild(li);}
 
