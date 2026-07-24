@@ -746,13 +746,41 @@ function exportCSV(rows){
   a.download="card-desk-cards.csv";document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),1500);toast("CSV exported ("+rows.length+" cards)","ok");}
 function cardForSheet(c){return {id:c.id,name:c.full_name||"",title:c.designation||"",company:c.company||"",phone:c.mobile||c.office_phones||"",email:c.emails||"",city:c.city||"",country:c.country||"",website:c.website||"",linkedin:c.linkedin_url||"",status:c.enrich_status||""};}
+/* ── Per-user Google Sheet sync: each user's cards live in a Sheet inside
+      their OWN Google account ("Card Desk — their@email") ── */
+let S_TC=null,S_TOK=null,S_EXP=0,S_Q=[];
+function sheetToken(cb){const now=Date.now();
+  try{if(!S_TOK){const s=JSON.parse(sessionStorage.getItem("stok")||"null");if(s&&s.exp>now){S_TOK=s.t;S_EXP=s.exp;}}}catch(e){}
+  if(S_TOK&&S_EXP>now)return cb(S_TOK);
+  if(!(window.google&&google.accounts&&google.accounts.oauth2)){toast("Google is still loading — try again","err");return;}
+  if(!S_TC)S_TC=google.accounts.oauth2.initTokenClient({client_id:GOOGLE_CLIENT_ID,scope:"https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/drive.file",callback:function(r){
+    if(!r||r.error){toast("Google access cancelled","err");S_Q=[];return;}
+    S_TOK=r.access_token;S_EXP=Date.now()+50*60*1000;
+    try{sessionStorage.setItem("stok",JSON.stringify({t:S_TOK,exp:S_EXP}));}catch(e){}
+    const q=S_Q.slice();S_Q=[];q.forEach(f=>f(S_TOK));}});
+  S_Q.push(cb);S_TC.requestAccessToken();}
 async function syncSheet(){
-  if(!SHEET_WEBHOOK_URL){toast("Add your Google Sheet link first (SHEET_WEBHOOK_URL in the code).","err");return;}
-  startBar();toast("Syncing "+CARDS.length+" cards to your Sheet…","ok");
-  try{await fetch(SHEET_WEBHOOK_URL,{method:"POST",mode:"no-cors",body:JSON.stringify({type:"cards",cards:CARDS.map(cardForSheet)})});
-    toast("Synced to your Google Sheet","ok");}
-  catch(e){toast("Sync failed — check the Sheet link.","err");}
-  finally{doneBar();}}
+  if(!CARDS.length){toast("No cards to sync yet","err");return;}
+  sheetToken(async tok=>{startBar();toast("Syncing "+CARDS.length+" card(s) to your Google Sheet…","ok");
+    try{
+      const H={"Authorization":"Bearer "+tok,"Content-Type":"application/json"};
+      const key="cd_sheet_"+(ME||"me");let sid=null;
+      try{sid=localStorage.getItem(key);}catch(e){}
+      if(sid){const chk=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"?fields=spreadsheetId",{headers:H});if(!chk.ok)sid=null;}
+      if(!sid){
+        const title="Card Desk — "+(ME||"My Cards");
+        const cr=await fetch("https://sheets.googleapis.com/v4/spreadsheets",{method:"POST",headers:H,body:JSON.stringify({properties:{title:title}})});
+        if(!cr.ok)throw new Error("create HTTP "+cr.status);
+        sid=(await cr.json()).spreadsheetId;try{localStorage.setItem(key,sid);}catch(e){}}
+      const cols=["ID","Name","Title","Company","Mobile","Office","Email","Website","City","Country","LinkedIn","Status","Added"];
+      const rows=CARDS.map(c=>[c.id,c.full_name||"",c.designation||"",c.company||"",c.mobile||"",c.office_phones||"",c.emails||"",c.website||"",c.city||"",c.country||"",c.linkedin_url||"",c.enrich_status||"",c.created_at||""]);
+      await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"/values/A1:Z10000:clear",{method:"POST",headers:H,body:"{}"});
+      const up=await fetch("https://sheets.googleapis.com/v4/spreadsheets/"+sid+"/values/A1?valueInputOption=RAW",{method:"PUT",headers:H,body:JSON.stringify({values:[cols].concat(rows)})});
+      if(!up.ok)throw new Error("write HTTP "+up.status);
+      toast("✓ "+CARDS.length+" card(s) synced to your Google Sheet","ok");
+      window.open("https://docs.google.com/spreadsheets/d/"+sid,"_blank","noopener");
+    }catch(e){toast("Sheet sync failed: "+e.message,"err");}
+    finally{doneBar();}});}
 
 function infoTile(ic,key,val,cp){if(!val)return null;const d=el("div","info");d.appendChild(icoSpan(ic));
   const t=el("div");t.style.minWidth="0";t.appendChild(el("div","k",key));t.appendChild(el("div","v",val));d.appendChild(t);
