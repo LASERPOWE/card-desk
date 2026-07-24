@@ -201,6 +201,52 @@ def resolve_photo(linkedin_url, emails, twitter_url, current=""):
     return ""
 
 
+_TITLE_BAD = ("linkedin", "profile", "shows", "employment", "associated",
+              "visible", "publicly", "exact title", "not publicly", "unknown",
+              "n/a", "per ", "http", "search", "could not", "no public")
+
+
+def _bad_title(s):
+    """A real title is short. Anything long or containing research-speak is a
+    sentence the model wrote, not a job title."""
+    s = str(s or "").strip()
+    if not s:
+        return False
+    low = s.lower()
+    return len(s) > 55 or len(s.split()) > 8 or any(b in low for b in _TITLE_BAD)
+
+
+def clean_role(raw):
+    """Turn 'Data Analyst at Laser Power (per LinkedIn). ([theorg...])' into
+    'Data Analyst'. Returns '' when there's no clean title to keep."""
+    r = str(raw or "").strip()
+    if not r:
+        return ""
+    r = re.sub(r"\(\[.*$", "", r)                       # drop ([source])
+    r = re.sub(r"\(per\b.*$", "", r, flags=re.I)         # drop (per ...)
+    r = re.sub(r"\s*\(.*$", "", r)                       # drop trailing paren
+    r = re.split(r"\s+\bat\b\s+", r, 1)[0]               # cut before "at Company"
+    r = r.split(". ")[0].split(";")[0].strip(" .,-–—–—")
+    return "" if _bad_title(r) else r[:80]
+
+
+def clean_bad_designations():
+    """Boot pass: fix Title cells that hold a research sentence instead of a
+    job title — re-clean them, or blank them so the sheet stays tidy."""
+    try:
+        n = 0
+        for c in db.list_cards():
+            d = str(c.get("designation") or "").strip()
+            if d and _bad_title(d):
+                db.set_fields(c["id"], designation=clean_role(d))
+                n += 1
+        if n:
+            log.info("Cleaned %s messy Title value(s)", n)
+            db.backup_now(force=True)
+    except Exception:
+        log.exception("clean_bad_designations failed (continuing)")
+
+
 def enrich_card_now(card_id):
     """Enrich a single card synchronously. Safe to call from API or worker."""
     card = db.get_card(card_id)
@@ -285,17 +331,18 @@ def enrich_card_now(card_id):
 
     db.update_enrichment(card_id, data, status)
 
-    # Title backfill: ID badges print no job title. When research found the
-    # person's current role, use it so the Title column isn't blank.
+    # Title backfill: ID badges print no job title. When research found a clean
+    # current role, use it; a garbled sentence is worse than blank.
     try:
-        if not str(card.get("designation") or "").strip():
-            role = ""
+        cur = str(card.get("designation") or "").strip()
+        if not cur or _bad_title(cur):
             lp = data.get("linkedin_position", "") or ""
             m = re.search(r"Current Role\s*[:\-]\s*(.+)", lp, re.I)
-            if m:
-                role = m.group(1).strip().splitlines()[0].strip(" .-")
-            if role and role.lower() not in ("not publicly available", "unknown", "n/a"):
-                db.set_fields(card_id, designation=role[:90])
+            role = clean_role(m.group(1)) if m else ""
+            if role:
+                db.set_fields(card_id, designation=role)
+            elif _bad_title(cur):
+                db.set_fields(card_id, designation="")  # wipe the old sentence
     except Exception:
         log.exception("designation backfill failed (continuing)")
 
@@ -335,6 +382,7 @@ def revalidate_bad_links():
 def _loop():
     try:
         revalidate_bad_links()
+        clean_bad_designations()
     except Exception:
         pass
     while True:
