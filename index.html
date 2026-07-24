@@ -75,17 +75,18 @@ header{position:sticky;top:0;z-index:40;background:rgba(15,28,74,.55);backdrop-f
 main{max-width:1480px;margin:0 auto;padding:0 26px 40px}
 
 /* hero */
-.hero{position:relative;overflow:hidden;border-radius:26px;margin:24px 0 22px;min-height:340px;display:flex;align-items:center;
+.hero{position:relative;overflow:hidden;border-radius:26px;margin:24px 0 22px;min-height:0;display:flex;align-items:center;justify-content:center;text-align:center;
   border:1px solid var(--line);background:linear-gradient(120deg,rgba(28,70,214,.55),rgba(12,26,69,.2));box-shadow:var(--shadow)}
-.hero-canvas{position:absolute;top:0;right:0;height:100%;width:62%;z-index:0}
-.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,rgba(12,26,69,.55) 0%,rgba(12,26,69,.15) 40%,transparent 70%);z-index:1;pointer-events:none}
-.hero-in{position:relative;z-index:2;padding:40px 44px;max-width:640px}
-.eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:.72rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:16px}
+.hero-canvas{display:none}
+.hero-brand{display:inline-block;background:#fff;padding:10px 20px;border-radius:15px;margin-bottom:18px;box-shadow:0 10px 30px rgba(4,12,40,.35)}
+.hero-brand img{height:44px;display:block}
+.hero-in{position:relative;z-index:2;padding:44px 30px 38px;max-width:760px;margin:0 auto}
+.eyebrow{display:inline-flex;align-items:center;justify-content:center;gap:9px;font-size:.72rem;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent);margin-bottom:16px}
 .eyebrow::before{content:"";width:26px;height:2px;background:var(--accent);border-radius:2px}
 .hero h1{font-family:var(--display);font-size:clamp(2.1rem,4.6vw,3.3rem);font-weight:700;line-height:1.04;letter-spacing:-1px;color:#fff}
 .hero h1 .thin{display:block;color:var(--ink-2);font-weight:500}
-.hero p.lead{color:var(--ink-2);font-size:1rem;line-height:1.6;margin-top:16px;max-width:460px}
-.hero-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px}
+.hero p.lead{color:var(--ink-2);font-size:1rem;line-height:1.6;margin:16px auto 0;max-width:520px}
+.hero-stats{display:flex;gap:10px;flex-wrap:wrap;margin-top:24px;justify-content:center}
 .chip-s{display:flex;align-items:center;gap:11px;padding:11px 16px;border-radius:14px;background:var(--glass);border:1px solid var(--line);backdrop-filter:blur(8px)}
 .chip-s .ci{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-size:.95rem;background:var(--glass-2)}
 .chip-s.t .ci{color:#fff}.chip-s.d .ci{color:#7ef0bf;background:var(--green-s)}.chip-s.p .ci{color:#ffd27a;background:var(--amber-s)}.chip-s.n .ci{color:#ff9aa8;background:var(--rose-s)}
@@ -370,6 +371,7 @@ table.sheet .badge{transform:scale(.9)}
     <div class="hero">
       <canvas class="hero-canvas" id="sphere"></canvas>
       <div class="hero-in">
+        <div class="hero-brand" id="heroBrand"></div>
         <div class="eyebrow">Enterprise Business Intelligence</div>
         <h1>Card Desk<span class="thin">Every card, decoded &amp; enriched.</span></h1>
         <p class="lead">AI reads each business card and researches the person &amp; company across the web — a living directory for Laser Power &amp; Infra.</p>
@@ -512,6 +514,7 @@ const ICON={
 function setIcon(id,name){const e=document.getElementById(id);if(e)e.innerHTML=ICON[name]||"";}
 function icoSpan(name,cls){const s=document.createElement("span");s.className="ic"+(cls?" "+cls:"");s.innerHTML=ICON[name]||"";return s;}
 ["i-dir:dir","i-up:up","i-out:out","i-search:search","i-chev:chev","i-grid:grid","i-list:list","i-sheet:sheet","i-cards:cards","i-spark:spark","mi-dir:dir","mi-up:up","mi-out:out"].forEach(p=>{const[a,b]=p.split(":");setIcon(a,b);});
+(function(){const hl=document.querySelector(".lpi-img"),hb=document.getElementById("heroBrand");if(hl&&hb)hb.appendChild(hl.cloneNode());})();
 
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=String(text);return e;}
 function link(href,text,cls){const a=el("a",cls,text);a.href=href;a.target="_blank";a.rel="noopener noreferrer";return a;}
