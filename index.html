@@ -818,7 +818,8 @@ function autoSyncSheet(force){
     let cached=false;try{const s=JSON.parse(sessionStorage.getItem("stok")||"null");cached=!!(s&&s.exp>Date.now());}catch(e){}
     if(!cached&&!S_TOK)return; /* no silent token — wait for a user action */
   }
-  sheetToken(async tok=>{try{await sheetSyncCore(tok,force===true,!force);}catch(e){}});}
+  /* Never auto-open the Sheet — it only opens when the user taps "Sync to Sheet". */
+  sheetToken(async tok=>{try{await sheetSyncCore(tok,false,!force);}catch(e){}});}
 
 function infoTile(ic,key,val,cp){if(!val)return null;const d=el("div","info");d.appendChild(icoSpan(ic));
   const t=el("div");t.style.minWidth="0";t.appendChild(el("div","k",key));t.appendChild(el("div","v",val));d.appendChild(t);
@@ -893,7 +894,7 @@ async function startUpload(){const log=document.getElementById("uplog"),btn=docu
     logLine(log,"info",ok+" card(s) saved. Web research runs in the background — details appear in the Directory within 1–2 minutes.");
     UPLOAD_FILES=[];renderPreviews();loadCards();if(ok)toast(ok+" card(s) uploaded","ok");
     autoSaveIds((j.results||[]).filter(x=>x.ok).map(x=>x.id));
-    if(ok)setTimeout(()=>autoSyncSheet(true),2500); /* scan → straight into the Sheet */
+    if(ok)setTimeout(()=>autoSyncSheet(true),2500); /* scan → Sheet updates silently (no tab opens) */
   }catch(e){logLine(log,"err","Server error: "+e);toast("Upload failed","err");}finally{doneBar();btn.disabled=false;}}
 function logLine(box,type,text,reset){if(reset)box.replaceChildren();const li=el("div","li "+type);li.appendChild(icoSpan(type==="err"?"x":type==="ok"?"check":"spark"));li.appendChild(el("span",null,text));box.appendChild(li);}
 

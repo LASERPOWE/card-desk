@@ -112,7 +112,10 @@ COMPANY: {company} (search also as "{company_short}")
 TASKS:
 1. linkedin_url - Find the exact profile URL matching linkedin.com/in/<slug>.
    Try: site:linkedin.com/in "{name}" {company_short}  then broader searches.
-   NEVER invent a slug. No search-page URLs. If not found after trying, return "".
+   STRICT: the slug must clearly correspond to THIS person's name (it normally
+   contains their first and/or last name) AND the result snippet must mention
+   their company or role. NEVER invent a slug. No search-page URLs. A wrong
+   profile is worse than none - if unsure, return "".
 2. linkedin_photo_url - Direct profile image URL ONLY if a real CDN URL
    (media.licdn.com / static.licdn.com etc.) appears in results. Else "".
 3. summary - 2-3 plain-English sentences: who this person is, what the company does,
