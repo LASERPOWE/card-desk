@@ -131,13 +131,18 @@ TASKS:
 5. company_core_business - Bullet-point COMPANY profile:
    • Overview • Founded • Headquarters • Core Business • Products/Services
    • Industry • Key Leadership • Market Position • Recent News • Official Website
-6. other_web_profiles - Hunt the person's SOCIAL profiles specifically. Run targeted
-   searches: site:facebook.com "{name}" {company_short} | site:x.com OR site:twitter.com
-   "{name}" {company_short} | site:instagram.com "{name}". List every VERIFIED profile
-   or mention URL one per line, labelled like:
-   Facebook: <url>
-   Twitter: <url>
-   Instagram: <url>
+6. other_web_profiles - Hunt the person's OWN personal SOCIAL profiles - NEVER
+   the company's official page. Run targeted searches: site:facebook.com "{name}"
+   {company_short} | site:x.com OR site:twitter.com "{name}" {company_short} |
+   site:instagram.com "{name}". Before including a Facebook/Twitter/Instagram
+   link, confirm the profile itself (name, bio, photo) belongs to THIS person -
+   a page named after the company, a brand account, or a page you're only
+   guessing is theirs must be left out entirely. If you can't find the
+   person's own account on a platform, skip that platform - do not substitute
+   the company's page for it. List every confirmed line one per line, labelled:
+   Facebook: <url>          (must be the PERSON's own profile)
+   Twitter: <url>            (must be the PERSON's own profile)
+   Instagram: <url>          (must be the PERSON's own profile)
    YouTube: <url>
    Crunchbase: <url>
    News: <url>

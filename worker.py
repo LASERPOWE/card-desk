@@ -247,6 +247,26 @@ def clean_bad_designations():
         log.exception("clean_bad_designations failed (continuing)")
 
 
+_PERSONAL_PLATFORMS = ("facebook", "twitter", "x", "instagram")
+
+
+def keep_personal_only(text, name):
+    """Keep every line as-is EXCEPT Facebook/Twitter/X/Instagram lines, which
+    are only kept when the URL's path actually matches the person's name.
+    A company's own social page is never the person's profile."""
+    out = []
+    for line in str(text or "").split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r"^([A-Za-z ]+):\s*(https?://\S+)", line)
+        if m and m.group(1).strip().lower() in _PERSONAL_PLATFORMS:
+            if _path_score(m.group(2), name) < 1:
+                continue  # company/page URL, not this person — drop it
+        out.append(line)
+    return "\n".join(out)
+
+
 def enrich_card_now(card_id):
     """Enrich a single card synchronously. Safe to call from API or worker."""
     card = db.get_card(card_id)
@@ -259,6 +279,12 @@ def enrich_card_now(card_id):
 
     log.info("Enriching card #%s: %s @ %s", card_id, name, company)
     data, api_ok = ai.enrich_person(name, desig, company)
+
+    # The AI's own Facebook/Twitter/Instagram lines are NOT pre-verified against
+    # the person's name — a company page can slip through. Drop any such line
+    # whose URL doesn't actually match the person; keep Company/News/etc as-is.
+    data["other_web_profiles"] = keep_personal_only(
+        data.get("other_web_profiles", ""), name)
 
     # Social-profile hunt (free, DuckDuckGo) — name-verified matches only
     socials = {}
@@ -380,11 +406,10 @@ def revalidate_bad_links():
 
 
 def _loop():
-    try:
-        revalidate_bad_links()
-        clean_bad_designations()
-    except Exception:
-        pass
+    # No boot-time bulk pass over the whole directory anymore — the backend
+    # only touches cards a user actually queued (a fresh scan, or someone
+    # tapping "Re-run Research"), which is exactly what rows_needing_enrichment
+    # below picks up. Nothing runs on cards the user didn't act on.
     while True:
         try:
             with _lock:

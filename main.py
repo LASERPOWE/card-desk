@@ -100,25 +100,9 @@ def startup():
     else:
         _seed_data()  # still restores any bundled images that are missing
     db.init_db()
-    # Data hygiene: pull phone numbers out of ID-card notes, then remove any
-    # duplicate people so the master directory has each person exactly once.
-    try:
-        moved = db.backfill_phones()
-        removed = db.dedupe_all()
-        for _id, img in removed:
-            if img:
-                p = os.path.join(UPLOAD_DIR, img)
-                if os.path.exists(p):
-                    try:
-                        os.remove(p)
-                    except OSError:
-                        pass
-        if moved or removed:
-            log.info("Startup cleanup: %s phone(s) backfilled, %s duplicate(s) removed",
-                     moved, len(removed))
-            db.backup_async(force=True)
-    except Exception:
-        log.exception("Startup cleanup failed (continuing)")
+    # No automatic bulk re-scanning of existing cards on boot — the backend
+    # only acts on a user's own action now (a scan, or the Re-run Research
+    # button on a card). Nothing runs on the whole directory by itself.
     worker.start_worker()
     _self_keepalive()
 
