@@ -708,6 +708,7 @@ function renderCards(){const grid=document.getElementById("grid");grid.replaceCh
     if(meta.children.length)card.appendChild(meta);
     const foot=el("div","foot");const v=link("/uploads/"+encodeURIComponent(c.image_file),"View Card","btn-view");v.prepend(icoSpan("cards"));v.onclick=e=>e.stopPropagation();foot.appendChild(v);
     if(c.linkedin_url){const li=link(c.linkedin_url,"LinkedIn","btn-li");li.onclick=e=>e.stopPropagation();foot.appendChild(li);}
+    socialLinks(c).forEach(s=>{const b=link(s.url,s.label,"btn-li");b.onclick=e=>e.stopPropagation();foot.appendChild(b);});
     const qbtn=el("button","btn-qr");qbtn.setAttribute("aria-label","QR code for "+(c.full_name||"card"));qbtn.title="QR code";qbtn.appendChild(icoSpan("qr"));qbtn.onclick=e=>{e.stopPropagation();openModal(c.id,"qr");};foot.appendChild(qbtn);
     card.appendChild(foot);grid.appendChild(card);});}
 let SHEET_SORT={k:"full_name",dir:1};
@@ -745,6 +746,13 @@ function exportCSV(rows){
   const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
   a.download="card-desk-cards.csv";document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),1500);toast("CSV exported ("+rows.length+" cards)","ok");}
+function socialLinks(c){const txt=String(c.other_web_profiles||"");const out=[];
+  const grab=(re,label)=>{const m=txt.match(re);if(m)out.push({url:m[0],label:label});};
+  grab(/https?:\/\/(?:www\.|m\.)?facebook\.com\/[^\s,|)"'<>]+/i,"Facebook");
+  grab(/https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/[^\s,|)"'<>]+/i,"X");
+  grab(/https?:\/\/(?:www\.)?instagram\.com\/[^\s,|)"'<>]+/i,"Instagram");
+  grab(/https?:\/\/(?:www\.)?youtube\.com\/[^\s,|)"'<>]+/i,"YouTube");
+  return out;}
 function cardForSheet(c){return {id:c.id,name:c.full_name||"",title:c.designation||"",company:c.company||"",phone:c.mobile||c.office_phones||"",email:c.emails||"",city:c.city||"",country:c.country||"",website:c.website||"",linkedin:c.linkedin_url||"",status:c.enrich_status||""};}
 /* ── Per-user Google Sheet sync: each user's cards live in a Sheet inside
       their OWN Google account ("Card Desk — their@email") ── */

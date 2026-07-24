@@ -100,9 +100,10 @@ def strip_company_suffix(name):
 def build_enrich_prompt(full_name, designation, company, company_short):
     return """You are a professional business researcher with a live web search tool.
 Research the person and company below using ALL available web sources - not just LinkedIn:
-official company website, news articles, business directories (Crunchbase, ZaubaCorp, Tofler),
-regulatory/industry portals (AMFI, SEBI, MCA where relevant), conference bios, press releases,
-interviews, Twitter/X, and any professional listing.
+official company website, news articles, business directories (Crunchbase, ZaubaCorp, Tofler,
+Justdial, IndiaMART), regulatory/industry portals (AMFI, SEBI, MCA where relevant), conference
+bios, press releases, interviews, and ALL social platforms: Twitter/X, Facebook, Instagram,
+YouTube, and any professional listing.
 
 PERSON: {name}
 DESIGNATION: {desig}
@@ -127,8 +128,17 @@ TASKS:
 5. company_core_business - Bullet-point COMPANY profile:
    • Overview • Founded • Headquarters • Core Business • Products/Services
    • Industry • Key Leadership • Market Position • Recent News • Official Website
-6. other_web_profiles - Other verified profile/mention URLs, one per line
-   (Twitter/X, Crunchbase, company bio page, news). Only URLs seen in results.
+6. other_web_profiles - Hunt the person's SOCIAL profiles specifically. Run targeted
+   searches: site:facebook.com "{name}" {company_short} | site:x.com OR site:twitter.com
+   "{name}" {company_short} | site:instagram.com "{name}". List every VERIFIED profile
+   or mention URL one per line, labelled like:
+   Facebook: <url>
+   Twitter: <url>
+   Instagram: <url>
+   YouTube: <url>
+   Crunchbase: <url>
+   News: <url>
+   Only URLs actually seen in search results - never guess or invent handles.
 7. enrich_sources - URLs you actually used, comma-separated.
 
 RULES: Every fact must come from live search results - never invent.

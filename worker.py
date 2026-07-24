@@ -67,6 +67,41 @@ def open_source_lookup(company, website):
     return out
 
 
+_SOCIAL_TARGETS = [
+    ("linkedin",  "site:linkedin.com/in", ["linkedin.com/in/"]),
+    ("facebook",  "site:facebook.com",    ["facebook.com/"]),
+    ("twitter",   "site:x.com OR site:twitter.com", ["twitter.com/", "x.com/"]),
+    ("instagram", "site:instagram.com",   ["instagram.com/"]),
+]
+_SOCIAL_BAD = ["/search", "/share", "/login", "/dir/", "/hashtag/", "/groups/",
+               "/pages/category", "facebook.com/public", "/status/", "/reel"]
+
+
+def find_social_profiles(name, company):
+    """Free social-profile hunt via DuckDuckGo HTML search (no API key).
+    Returns {platform: url}; never raises."""
+    import urllib.parse
+    found = {}
+    if not name:
+        return found
+    ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CardDesk"}
+    q_base = '"%s" %s' % (name, company or "")
+    for key, filt, domains in _SOCIAL_TARGETS:
+        try:
+            r = requests.get("https://html.duckduckgo.com/html/",
+                             params={"q": q_base + " " + filt},
+                             headers=ua, timeout=8)
+            for enc in re.findall(r'uddg=([^&"]+)', r.text)[:6]:
+                url = urllib.parse.unquote(enc).split("&")[0]
+                if any(d in url for d in domains) and not any(b in url for b in _SOCIAL_BAD):
+                    found[key] = url
+                    break
+            time.sleep(1)
+        except Exception:
+            pass
+    return found
+
+
 def enrich_card_now(card_id):
     """Enrich a single card synchronously. Safe to call from API or worker."""
     card = db.get_card(card_id)
@@ -83,6 +118,22 @@ def enrich_card_now(card_id):
     # Avatar fallback: derive unavatar URL from LinkedIn slug when no CDN photo
     if not data.get("linkedin_photo_url") and data.get("linkedin_url"):
         data["linkedin_photo_url"] = ai.derive_avatar_from_linkedin(data["linkedin_url"])
+
+    # Social-profile hunt (free, DuckDuckGo): fills what the AI missed
+    try:
+        socials = find_social_profiles(name, company)
+        if socials.get("linkedin") and not data.get("linkedin_url"):
+            data["linkedin_url"] = socials["linkedin"]
+        prev = data.get("other_web_profiles", "") or ""
+        adds = []
+        for k in ("facebook", "twitter", "instagram"):
+            u = socials.get(k)
+            if u and u not in prev:
+                adds.append(k.capitalize() + ": " + u)
+        if adds:
+            data["other_web_profiles"] = (prev + ("\n" if prev else "") + "\n".join(adds))[:900]
+    except Exception:
+        log.exception("find_social_profiles failed (continuing)")
 
     # Open-source extras (free): fill gaps the AI left + extra sources
     try:
