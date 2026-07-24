@@ -797,7 +797,8 @@ async function sheetSyncCore(tok,openAfter,quiet){
   if(!up.ok)throw new Error("write HTTP "+up.status);
   SHEET_LAST_SIG=sheetSig();SHEET_LAST_TS=Date.now();
   if(!quiet)toast("✓ "+CARDS.length+" card(s) saved to your Google Sheet","ok");
-  if(openAfter)window.open("https://docs.google.com/spreadsheets/d/"+sid,"_blank","noopener");
+  if(openAfter){const w=window.open("https://docs.google.com/spreadsheets/d/"+sid,"_blank","noopener");
+    if(!w)toast("Sheet updated ✓ — popup blocked; tap Sync to Sheet to open it","ok");}
 }
 function sheetSig(){return CARDS.map(c=>c.id+":"+c.enrich_status).join(",");}
 async function syncSheet(){
@@ -817,7 +818,7 @@ function autoSyncSheet(force){
     let cached=false;try{const s=JSON.parse(sessionStorage.getItem("stok")||"null");cached=!!(s&&s.exp>Date.now());}catch(e){}
     if(!cached&&!S_TOK)return; /* no silent token — wait for a user action */
   }
-  sheetToken(async tok=>{try{await sheetSyncCore(tok,false,true);}catch(e){}});}
+  sheetToken(async tok=>{try{await sheetSyncCore(tok,force===true,!force);}catch(e){}});}
 
 function infoTile(ic,key,val,cp){if(!val)return null;const d=el("div","info");d.appendChild(icoSpan(ic));
   const t=el("div");t.style.minWidth="0";t.appendChild(el("div","k",key));t.appendChild(el("div","v",val));d.appendChild(t);
