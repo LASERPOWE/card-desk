@@ -943,11 +943,6 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();
 initSphere(document.getElementById("sphere"));
 loadCards();
 setTimeout(hideBoot,6000);
-/* Fast refresh while research runs; slow heartbeat always — so a card scanned
-   on any phone shows up on every open screen without a manual reload. */
-setInterval(()=>{if(CARDS.some(c=>c.enrich_status==="pending"||c.enrich_status==="failed"))loadCards(true);},9000);
-setInterval(()=>loadCards(true),40000);
-document.addEventListener("visibilitychange",()=>{if(!document.hidden)loadCards(true);});
 </script>
 </body>
 </html>
