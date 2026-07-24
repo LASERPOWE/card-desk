@@ -124,7 +124,7 @@ def healthz():
 
 @app.get("/login")
 def login_page():
-    return FileResponse(os.path.join(STATIC_DIR, "login.html"))
+    return FileResponse(os.path.join(STATIC_DIR, "login.html"), headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 @app.post("/api/login")
@@ -178,12 +178,12 @@ def api_logout():
 # ── Pages & static ───────────────────────────────────────────────────────────
 @app.get("/")
 def index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"), headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 @app.get("/user")
 def user_page():
-    return FileResponse(os.path.join(STATIC_DIR, "user.html"))
+    return FileResponse(os.path.join(STATIC_DIR, "user.html"), headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 # ── Public "scan → save to your Google Contacts" flow ─────────────────────────
@@ -197,7 +197,7 @@ _PUB_FIELDS = [
 @app.get("/c/{card_id}")
 def public_card_page(card_id: int):
     """The page a phone opens after scanning a card's QR — no login required."""
-    return FileResponse(os.path.join(STATIC_DIR, "save.html"))
+    return FileResponse(os.path.join(STATIC_DIR, "save.html"), headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 @app.get("/api/pub/cards/{card_id}")
