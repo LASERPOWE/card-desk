@@ -130,7 +130,11 @@ function gPerson(c){
   const p={names:[{givenName:parts[0]||nm,familyName:parts.length>1?parts.slice(1).join(" "):""}]};
   if(c.company||c.designation)p.organizations=[{name:c.company||"",title:c.designation||""}];
   const tel=[];multi(c.mobile).forEach(v=>tel.push({value:v,type:"mobile"}));
-  multi(c.office_phones).forEach(v=>tel.push({value:v,type:"work"}));if(tel.length)p.phoneNumbers=tel;
+  multi(c.office_phones).forEach(v=>tel.push({value:v,type:"work"}));
+  /* Safety net: pull the number from the raw card text if extraction missed it */
+  if(!tel.length){const src=String(c.notes||"")+"\n"+String(c.raw_summary||"");
+    (src.match(/\+?\d[\d\s\-()\/]{7,}\d/g)||[]).slice(0,3).forEach(v=>tel.push({value:v.replace(/\s{2,}/g," ").trim(),type:"other"}));}
+  if(tel.length)p.phoneNumbers=tel;
   const em=multi(c.emails).map(v=>({value:v,type:"work"}));if(em.length)p.emailAddresses=em;
   const urls=[];multi(c.website).forEach(w=>urls.push({value:safeUrl(w)}));
   if(c.linkedin_url)urls.push({value:c.linkedin_url});if(urls.length)p.urls=urls;

@@ -17,10 +17,10 @@ import db
 
 log = logging.getLogger("card-desk.worker")
 
-WORKER_INTERVAL = 60      # seconds between scans
+WORKER_INTERVAL = 30      # seconds between scans (faster research turnaround)
 MAX_ATTEMPTS = 3
-BATCH_PER_RUN = 3
-SLEEP_BETWEEN_CALLS = 3   # seconds
+BATCH_PER_RUN = 4
+SLEEP_BETWEEN_CALLS = 1   # seconds
 
 _lock = threading.Lock()
 
@@ -112,13 +112,15 @@ _SOCIAL_BAD = ["/search", "/share", "/login", "/dir/", "/hashtag/", "/groups/",
 def find_social_profiles(name, company):
     """Free social-profile hunt via DuckDuckGo HTML search (no API key).
     Only returns EXACT matches: the profile slug/handle must contain part of
-    the person's name. Returns {platform: url}; never raises."""
+    the person's name. All platforms searched in PARALLEL for speed.
+    Returns {platform: url}; never raises."""
     found = {}
     if not name:
         return found
     ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) CardDesk"}
     q_base = '"%s" %s' % (name, company or "")
-    for key, filt, domains in _SOCIAL_TARGETS:
+
+    def _one(key, filt, domains):
         try:
             r = requests.get("https://html.duckduckgo.com/html/",
                              params={"q": q_base + " " + filt},
@@ -133,10 +135,57 @@ def find_social_profiles(name, company):
                     best, best_score = url, s
             if best:  # name-verified match only — never a random same-name page
                 found[key] = best
-            time.sleep(1)
         except Exception:
             pass
+
+    threads = [threading.Thread(target=_one, args=t, daemon=True) for t in _SOCIAL_TARGETS]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=12)
     return found
+
+
+# ── Photo resolution: only store a URL that ACTUALLY serves an image ─────────
+def _photo_ok(url):
+    try:
+        r = requests.get(url, timeout=10,
+                         headers={"User-Agent": "Mozilla/5.0 CardDesk"})
+        return (r.status_code == 200
+                and r.headers.get("content-type", "").startswith("image")
+                and len(r.content) > 500)
+    except Exception:
+        return False
+
+
+def resolve_photo(linkedin_url, emails, twitter_url, current=""):
+    """Try every free photo source in order and return the first URL that
+    really returns an image: AI-found CDN photo → LinkedIn avatar → email
+    avatar → gravatar → X/Twitter avatar. '' when nothing works (frontend
+    then shows initials)."""
+    import hashlib
+    cands = []
+    if current and current.startswith("http"):
+        cands.append(current)
+    m = re.search(r"linkedin\.com/in/([a-zA-Z0-9\-_%\.]+)", str(linkedin_url or ""), re.I)
+    if m:
+        cands.append("https://unavatar.io/linkedin/" + m.group(1) + "?fallback=false")
+    em = ""
+    for part in re.split(r"[,;\s]+", str(emails or "")):
+        if "@" in part:
+            em = part.strip().lower()
+            break
+    if em:
+        cands.append("https://unavatar.io/" + urllib.parse.quote(em) + "?fallback=false")
+        cands.append("https://www.gravatar.com/avatar/"
+                     + hashlib.md5(em.encode()).hexdigest() + "?d=404&s=256")
+    tm = re.search(r"(?:x|twitter)\.com/([A-Za-z0-9_]{2,})", str(twitter_url or ""))
+    if tm:
+        cands.append("https://unavatar.io/x/" + tm.group(1) + "?fallback=false")
+    for u in cands:
+        if _photo_ok(u):
+            return u
+    return ""
 
 
 def enrich_card_now(card_id):
@@ -178,14 +227,14 @@ def enrich_card_now(card_id):
         ddg_li = ""
     data["linkedin_url"] = ai_li if (ai_li and ai_s >= ddg_s) else (ddg_li or ai_li)
 
-    # Profile photo: always derive from the FINAL verified LinkedIn slug via
-    # unavatar (live photo, no expiring CDN tokens); X/Twitter as fallback.
-    if data.get("linkedin_url"):
-        data["linkedin_photo_url"] = ai.derive_avatar_from_linkedin(data["linkedin_url"])
-    elif not data.get("linkedin_photo_url"):
-        m = re.search(r"(?:x|twitter)\.com/([A-Za-z0-9_]{2,})", socials.get("twitter", ""))
-        if m:
-            data["linkedin_photo_url"] = "https://unavatar.io/x/" + m.group(1) + "?fallback=false"
+    # Profile photo: test every source and store only a URL that actually
+    # serves an image (AI CDN → LinkedIn avatar → email → gravatar → X).
+    try:
+        data["linkedin_photo_url"] = resolve_photo(
+            data.get("linkedin_url", ""), card.get("emails", ""),
+            socials.get("twitter", ""), current=data.get("linkedin_photo_url", ""))
+    except Exception:
+        log.exception("resolve_photo failed (continuing)")
 
     # Open-source extras (free): fill gaps the AI left + extra sources
     try:
@@ -211,26 +260,31 @@ def enrich_card_now(card_id):
 
 
 def revalidate_bad_links():
-    """One pass per boot: any saved LinkedIn link whose slug does NOT contain
-    the person's name is wrong — clear it and queue fresh exact-match research.
-    Cards with a good link but no photo get a photo derived immediately."""
+    """One pass per boot: (a) any saved LinkedIn link whose slug does NOT
+    contain the person's name is wrong — clear it and queue fresh research;
+    (b) every card's photo is TESTED — broken/missing photos get re-resolved
+    from all free sources, so avatars actually load."""
     try:
         n = 0
         for c in db.list_cards():
             li = (c.get("linkedin_url") or "").strip()
-            if not li:
-                continue
-            if li_score(li, c.get("full_name", "")) < 1:
+            if li and li_score(li, c.get("full_name", "")) < 1:
                 db.update_enrichment(c["id"], {"linkedin_url": "", "linkedin_photo_url": ""},
                                      "pending", bump_attempt=False)
                 db.reset_for_reenrich(c["id"])
                 n += 1
                 log.info("Card #%s: LinkedIn link failed name check -> re-research", c["id"])
-            elif not (c.get("linkedin_photo_url") or "").strip():
-                db.update_enrichment(c["id"], {"linkedin_photo_url": ai.derive_avatar_from_linkedin(li)},
-                                     c.get("enrich_status") or "done", bump_attempt=False)
+                continue
+            photo = (c.get("linkedin_photo_url") or "").strip()
+            if not photo or not _photo_ok(photo):
+                new = resolve_photo(li, c.get("emails", ""), "", current="")
+                if new != photo:
+                    db.update_enrichment(c["id"], {"linkedin_photo_url": new},
+                                         c.get("enrich_status") or "done", bump_attempt=False)
+                    log.info("Card #%s: photo %s", c["id"], "fixed -> " + new if new else "none available")
         if n:
             log.info("Queued %s card(s) for exact-match LinkedIn re-research", n)
+        db.backup_now(force=True)
     except Exception:
         log.exception("revalidate_bad_links failed (continuing)")
 

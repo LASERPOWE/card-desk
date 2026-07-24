@@ -72,6 +72,24 @@ def _seed_data():
         log.exception("Seed step failed (continuing)")
 
 
+def _self_keepalive():
+    """Ping our own public URL every 5 min so the free instance never idles out —
+    visitors then never see the hosting provider's 'waking up' screen."""
+    import threading
+
+    url = os.environ.get("SELF_URL", "https://card-desk.onrender.com").rstrip("/") + "/healthz"
+
+    def _loop():
+        while True:
+            time.sleep(300)
+            try:
+                requests.get(url, timeout=20)
+            except Exception:
+                pass
+
+    threading.Thread(target=_loop, name="self-keepalive", daemon=True).start()
+
+
 @app.on_event("startup")
 def startup():
     # 1. Newest data first: restore the GitHub backup (every scan is pushed there)
@@ -83,6 +101,7 @@ def startup():
         _seed_data()  # still restores any bundled images that are missing
     db.init_db()
     worker.start_worker()
+    _self_keepalive()
 
 
 # ── Authentication ───────────────────────────────────────────────────────────
@@ -202,7 +221,7 @@ def user_page():
 _PUB_FIELDS = [
     "id", "full_name", "designation", "company", "department", "mobile",
     "office_phones", "emails", "website", "address", "city", "pin_code",
-    "country", "linkedin_url",
+    "country", "linkedin_url", "notes", "raw_summary", "linkedin_photo_url",
 ]
 
 

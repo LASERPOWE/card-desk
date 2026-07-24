@@ -563,7 +563,11 @@ function gPerson(c){
   const first=parts[0]||name,last=parts.length>1?parts.slice(1).join(" "):"";
   const p={names:[{givenName:first,familyName:last}]};
   if(c.company||c.designation)p.organizations=[{name:c.company||"",title:c.designation||""}];
-  const tel=[];vMulti(c.mobile).forEach(v=>tel.push({value:v,type:"mobile"}));vMulti(c.office_phones).forEach(v=>tel.push({value:v,type:"work"}));if(tel.length)p.phoneNumbers=tel;
+  const tel=[];vMulti(c.mobile).forEach(v=>tel.push({value:v,type:"mobile"}));vMulti(c.office_phones).forEach(v=>tel.push({value:v,type:"work"}));
+  /* Safety net: if extraction put the number somewhere else, pull it from the raw card text */
+  if(!tel.length){const src=String(c.notes||"")+"\n"+String(c.raw_summary||"");
+    (src.match(/\+?\d[\d\s\-()\/]{7,}\d/g)||[]).slice(0,3).forEach(v=>tel.push({value:v.replace(/\s{2,}/g," ").trim(),type:"other"}));}
+  if(tel.length)p.phoneNumbers=tel;
   const em=vMulti(c.emails).map(v=>({value:v,type:"work"}));if(em.length)p.emailAddresses=em;
   if(c.address||c.city||c.pin_code||c.country)p.addresses=[{streetAddress:c.address||"",city:c.city||"",postalCode:c.pin_code||"",country:c.country||"",type:"work"}];
   const urls=[];vMulti(c.website).forEach(w=>urls.push({value:safeUrl(w)}));if(c.linkedin_url)urls.push({value:c.linkedin_url});if(urls.length)p.urls=urls;
@@ -597,19 +601,34 @@ function gToken(cb){const now=Date.now();
 async function gSaveContact(c,tok){
   const r=await fetch("https://people.googleapis.com/v1/people:createContact",{method:"POST",headers:{"Authorization":"Bearer "+tok,"Content-Type":"application/json"},body:JSON.stringify(gPerson(c))});
   if(!r.ok)throw new Error("HTTP "+r.status);}
+function hasGTok(){if(G_TOK&&G_EXP>Date.now())return true;try{const s=JSON.parse(sessionStorage.getItem("gtok")||"null");return !!(s&&s.exp>Date.now());}catch(e){return false;}}
+function saveIdsNow(ids){gToken(async tok=>{let ok=0,fail=0;
+    for(const id of ids){try{const rr=await fetch("/api/cards/"+id);if(!rr.ok){fail++;continue;}await gSaveContact(await rr.json(),tok);ok++;}catch(e){fail++;}}
+    if(ok)toast("✓ "+ok+" contact(s) saved to your Google Contacts (number included)","ok");
+    if(fail)toast(fail+" contact(s) could not be saved — tap Save contacts again","err");});}
 function autoSaveIds(ids){if(!ids||!ids.length)return;
-  gToken(async tok=>{let ok=0;
-    for(const id of ids){try{const rr=await fetch("/api/cards/"+id);if(!rr.ok)continue;await gSaveContact(await rr.json(),tok);ok++;}catch(e){}}
-    if(ok)toast("✓ "+ok+" contact(s) auto-saved to your Google Contacts","ok");});}
+  if(hasGTok()){saveIdsNow(ids);return;}
+  /* First time: browsers block Google's popup after an async upload finishes,
+     so give a tap button — a real tap always lets the permission popup open. */
+  const log=document.getElementById("uplog");
+  const b=el("button","btn");b.style.marginTop="10px";b.textContent="💾 Save "+ids.length+" contact(s) to Google Contacts";
+  b.onclick=()=>{b.textContent="Saving…";saveIdsNow(ids);setTimeout(()=>{b.remove();},4000);};
+  if(log){log.appendChild(b);}
+  toast("Tap the green button to save contact(s) to Google","ok");}
 function dlQrPng(c){const svg=qrSvg(cardUrl(c));if(!svg){toast("QR not available","err");return;}
   const img=new Image();const url=URL.createObjectURL(new Blob([svg],{type:"image/svg+xml"}));
   img.onload=function(){const s=760,cv=el("canvas");cv.width=s;cv.height=s;const x=cv.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,s,s);x.imageSmoothingEnabled=false;x.drawImage(img,0,0,s,s);URL.revokeObjectURL(url);cv.toBlob(function(b){const u=URL.createObjectURL(b);const a=el("a");a.href=u;a.download=slug(c.full_name)+"_qr.png";a.click();setTimeout(()=>URL.revokeObjectURL(u),1500);toast("QR image downloaded","ok");});};
   img.onerror=function(){toast("QR export failed","err");};img.src=url;}
 function avatarEl(c){
-  const ring=el("div","av-ring");const url=(c.linkedin_photo_url||"").trim();
-  if(url&&/^https?:\/\//i.test(url)){const img=el("img","avatar");img.src=url;img.alt="";img.loading="lazy";
-    img.onerror=()=>img.replaceWith(el("div","avatar-ph",initials(c.full_name)));ring.appendChild(img);}
-  else ring.appendChild(el("div","avatar-ph",initials(c.full_name)));return ring;
+  /* Photo fallback chain: LinkedIn photo → unavatar by email → gravatar-style → initials */
+  const ring=el("div","av-ring");const cands=[];
+  const url=(c.linkedin_photo_url||"").trim();if(url&&/^https?:\/\//i.test(url))cands.push(url);
+  const em=String(c.emails||"").split(/[,;\n]+/)[0].trim();
+  if(em&&/@/.test(em))cands.push("https://unavatar.io/"+encodeURIComponent(em)+"?fallback=false");
+  if(!cands.length){ring.appendChild(el("div","avatar-ph",initials(c.full_name)));return ring;}
+  const img=el("img","avatar");img.alt="";img.loading="lazy";let i=0;img.src=cands[0];
+  img.onerror=()=>{i++;if(i<cands.length)img.src=cands[i];else img.replaceWith(el("div","avatar-ph",initials(c.full_name)));};
+  ring.appendChild(img);return ring;
 }
 const STAT={done:{k:"Enriched",b:"b-done"},pending:{k:"Researching",b:"b-pending"},failed:{k:"Retrying",b:"b-pending"},not_found:{k:"No result",b:"b-not_found"}};
 
@@ -668,12 +687,12 @@ function initGeo(){if(!navigator.geolocation)return;
       if(city){MY_CITY=city.toLowerCase();MY_CITY_LABEL=city;renderCards();toast("📍 Showing "+city+" contacts first","ok");}
     }catch(e){}},function(){},{timeout:8000,maximumAge:600000});}
 setTimeout(initGeo,2500);
-async function loadCards(){startBar();try{const r=await fetch("/api/cards",{headers:{"Accept":"application/json"}});
+async function loadCards(silent){if(!silent)startBar();try{const r=await fetch("/api/cards",{headers:{"Accept":"application/json"},cache:"no-store"});
   const ct=(r.headers.get("content-type")||"");
   if(r.status===401||r.redirected||!ct.includes("application/json")){goLogin();return;}
   const j=await r.json();CARDS=j.cards||[];IS_ADMIN=!!j.admin;ME=j.me||"";renderStats();renderCards();
   try{autoSyncSheet(false);}catch(e){} /* research updates flow into the Sheet too */
-  }catch(e){console.error(e);}finally{doneBar();hideBoot();}}
+  }catch(e){console.error(e);}finally{if(!silent)doneBar();hideBoot();}}
 async function doLogout(){if(REDIRECTING)return;REDIRECTING=true;showBoot("Signing out…");try{await fetch("/api/logout",{method:"POST"});}catch(e){}setTimeout(()=>{location.href="/login";},550);}
 
 function counts(){const c={all:CARDS.length,done:0,pending:0,not_found:0};
@@ -904,7 +923,11 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();
 initSphere(document.getElementById("sphere"));
 loadCards();
 setTimeout(hideBoot,6000);
-setInterval(()=>{if(CARDS.some(c=>c.enrich_status==="pending"||c.enrich_status==="failed"))loadCards();},12000);
+/* Fast refresh while research runs; slow heartbeat always — so a card scanned
+   on any phone shows up on every open screen without a manual reload. */
+setInterval(()=>{if(CARDS.some(c=>c.enrich_status==="pending"||c.enrich_status==="failed"))loadCards(true);},9000);
+setInterval(()=>loadCards(true),40000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)loadCards(true);});
 </script>
 </body>
 </html>
