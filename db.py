@@ -82,12 +82,28 @@ def restore_from_backup(upload_dir):
     try:
         if os.path.exists(DB_PATH):
             return False
-        base = "https://raw.githubusercontent.com/%s/main/backup/" % BACKUP_REPO
-        r = _rq.get(base + "cards.db", timeout=25)
-        if r.status_code != 200 or not r.content.startswith(b"SQLite"):
+        content = None
+        # 1. GitHub API first — always fresh (no CDN cache), token = higher limits
+        try:
+            H = {"Accept": "application/vnd.github.raw"}
+            if GITHUB_TOKEN:
+                H["Authorization"] = "Bearer " + GITHUB_TOKEN
+            r = _rq.get("https://api.github.com/repos/%s/contents/backup/cards.db" % BACKUP_REPO,
+                        headers=H, timeout=25)
+            if r.status_code == 200 and r.content.startswith(b"SQLite"):
+                content = r.content
+        except Exception:
+            pass
+        # 2. Raw CDN fallback
+        if content is None:
+            base = "https://raw.githubusercontent.com/%s/main/backup/" % BACKUP_REPO
+            r = _rq.get(base + "cards.db", timeout=25)
+            if r.status_code == 200 and r.content.startswith(b"SQLite"):
+                content = r.content
+        if content is None:
             return False
         with open(DB_PATH, "wb") as f:
-            f.write(r.content)
+            f.write(content)
         _blog.info("Restored cards.db from GitHub backup")
         try:
             idx = _rq.get("https://api.github.com/repos/%s/contents/backup/uploads" % BACKUP_REPO,
