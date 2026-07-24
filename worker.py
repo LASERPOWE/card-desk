@@ -284,6 +284,21 @@ def enrich_card_now(card_id):
         status = "not_found" if attempts >= MAX_ATTEMPTS else "failed"
 
     db.update_enrichment(card_id, data, status)
+
+    # Title backfill: ID badges print no job title. When research found the
+    # person's current role, use it so the Title column isn't blank.
+    try:
+        if not str(card.get("designation") or "").strip():
+            role = ""
+            lp = data.get("linkedin_position", "") or ""
+            m = re.search(r"Current Role\s*[:\-]\s*(.+)", lp, re.I)
+            if m:
+                role = m.group(1).strip().splitlines()[0].strip(" .-")
+            if role and role.lower() not in ("not publicly available", "unknown", "n/a"):
+                db.set_fields(card_id, designation=role[:90])
+    except Exception:
+        log.exception("designation backfill failed (continuing)")
+
     log.info("Card #%s -> %s (LinkedIn: %s)", card_id, status, data.get("linkedin_url") or "-")
 
 

@@ -241,6 +241,117 @@ def delete_card(card_id):
         conn.execute("DELETE FROM cards WHERE id=?", (card_id,))
 
 
+def set_fields(card_id, **kw):
+    """Update arbitrary columns (used to backfill mobile/designation)."""
+    if not kw:
+        return
+    sets = ",".join(k + "=?" for k in kw)
+    with get_conn() as conn:
+        conn.execute("UPDATE cards SET " + sets + " WHERE id=?",
+                     list(kw.values()) + [card_id])
+
+
+# ── Duplicate control + data backfill ────────────────────────────────────────
+import re as _re
+
+
+def _norm(s):
+    return _re.sub(r"[^a-z0-9]", "", str(s or "").lower())
+
+
+def _dupkey(name, company):
+    return _norm(name) + "|" + _norm(company)
+
+
+def extract_phone(*texts):
+    """First real phone number (>=10 digits, optional +/spaces/dashes) found in
+    any of the given texts. Employee ID cards keep it under 'Emergency Contact'."""
+    for t in texts:
+        for m in _re.finditer(r"\+?\d[\d\s\-()\/]{7,}\d", str(t or "")):
+            digits = _re.sub(r"\D", "", m.group(0))
+            if 10 <= len(digits) <= 15:
+                return m.group(0).strip()
+    return ""
+
+
+def find_duplicate(name, company, phone="", exclude_id=None):
+    """Return the id of an existing card that is the SAME person (same
+    name+company), else the id of one sharing the same phone, else None.
+    Global across all owners so the master directory stays unique."""
+    if not _norm(name):
+        return None
+    key = _dupkey(name, company)
+    pnorm = _re.sub(r"\D", "", str(phone or ""))
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, full_name, company, mobile, office_phones FROM cards"
+        ).fetchall()
+    phone_hit = None
+    for r in rows:
+        if exclude_id and r["id"] == exclude_id:
+            continue
+        if _norm(r["full_name"]) and _dupkey(r["full_name"], r["company"]) == key:
+            return r["id"]
+        if pnorm and len(pnorm) >= 10 and phone_hit is None:
+            rp = _re.sub(r"\D", "", (r["mobile"] or "") + (r["office_phones"] or ""))
+            if pnorm[-10:] and pnorm[-10:] in rp:
+                phone_hit = r["id"]
+    return phone_hit
+
+
+def backfill_phones():
+    """Set mobile from notes/raw_summary wherever it's empty — so the number
+    shows in the sheet and flows into Google Contacts."""
+    n = 0
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, mobile, notes, raw_summary FROM cards").fetchall()
+        for r in rows:
+            if str(r["mobile"] or "").strip():
+                continue
+            ph = extract_phone(r["notes"], r["raw_summary"])
+            if ph:
+                conn.execute("UPDATE cards SET mobile=? WHERE id=?", (ph, r["id"]))
+                n += 1
+    return n
+
+
+def dedupe_all():
+    """Collapse cards that are the same person (name+company) to ONE best
+    record — the one with a phone, then the most filled fields, then the
+    earliest. Returns list of removed (id, image_file) so callers can delete
+    the images too."""
+    with get_conn() as conn:
+        rows = [dict(r) for r in conn.execute("SELECT * FROM cards").fetchall()]
+    groups = {}
+    for r in rows:
+        if not _norm(r.get("full_name")):
+            continue
+        groups.setdefault(_dupkey(r["full_name"], r["company"]), []).append(r)
+
+    def score(r):
+        filled = sum(1 for k in ("designation", "mobile", "office_phones",
+                                 "emails", "website", "city", "linkedin_url",
+                                 "other_web_profiles")
+                     if str(r.get(k) or "").strip())
+        has_phone = 1 if (str(r.get("mobile") or "").strip()
+                          or str(r.get("office_phones") or "").strip()) else 0
+        return (has_phone, filled, -r["id"])
+
+    removed = []
+    for grp in groups.values():
+        if len(grp) < 2:
+            continue
+        grp.sort(key=score, reverse=True)
+        for r in grp[1:]:
+            removed.append((r["id"], r.get("image_file", "")))
+    if removed:
+        with get_conn() as conn:
+            conn.executemany("DELETE FROM cards WHERE id=?",
+                             [(i,) for i, _ in removed])
+    return removed
+
+
 def reset_for_reenrich(card_id):
     with get_conn() as conn:
         conn.execute(

@@ -922,14 +922,20 @@ async function startUpload(){const log=document.getElementById("uplog"),btn=docu
   try{startBar();const r=await fetch("/api/upload",{method:"POST",body:fd});
     const ct=(r.headers.get("content-type")||"");
     if(r.status===401||r.redirected||!ct.includes("application/json")){doneBar();goLogin();return;}
-    const j=await r.json();let ok=0;log.replaceChildren();
-    for(const res of j.results){if(res.ok){ok++;logLine(log,"ok","✓ "+(res.name||"Card")+(res.company?" — "+res.company:"")+" saved");}else logLine(log,"err","✗ "+(res.file||"?")+": "+res.error);}
-    logLine(log,"info",ok+" card(s) saved. Web research runs in the background — details appear in the Directory within 1–2 minutes.");
-    UPLOAD_FILES=[];renderPreviews();loadCards();if(ok)toast(ok+" card(s) uploaded","ok");
+    const j=await r.json();let ok=0,dup=0;log.replaceChildren();
+    for(const res of j.results){
+      if(res.ok){ok++;logLine(log,"ok","✓ "+(res.name||"Card")+(res.company?" — "+res.company:"")+" saved");}
+      else if(res.duplicate){dup++;logLine(log,"warn","⚠ Duplicate record found — "+(res.name||"this card")+" is already in the directory, not added again.");}
+      else logLine(log,"err","✗ "+(res.file||"?")+": "+res.error);
+    }
+    logLine(log,"info",ok+" card(s) saved"+(dup?", "+dup+" duplicate(s) skipped":"")+". Web research runs in the background — details appear within 1–2 minutes.");
+    UPLOAD_FILES=[];renderPreviews();loadCards();
+    if(ok)toast(ok+" card(s) uploaded","ok");
+    if(dup)toast("⚠ "+dup+" duplicate record(s) found — not added again","err");
     autoSaveIds((j.results||[]).filter(x=>x.ok).map(x=>x.id));
     if(ok)setTimeout(()=>autoSyncSheet(true),2500); /* scan → Sheet updates silently (no tab opens) */
   }catch(e){logLine(log,"err","Server error: "+e);toast("Upload failed","err");}finally{doneBar();btn.disabled=false;}}
-function logLine(box,type,text,reset){if(reset)box.replaceChildren();const li=el("div","li "+type);li.appendChild(icoSpan(type==="err"?"x":type==="ok"?"check":"spark"));li.appendChild(el("span",null,text));box.appendChild(li);}
+function logLine(box,type,text,reset){if(reset)box.replaceChildren();const li=el("div","li "+type);li.appendChild(icoSpan(type==="err"?"x":type==="ok"?"check":type==="warn"?"search":"spark"));li.appendChild(el("span",null,text));box.appendChild(li);}
 
 document.addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();
   if(e.key==="/"&&document.activeElement.tagName!=="INPUT"&&document.activeElement.tagName!=="TEXTAREA"){e.preventDefault();document.getElementById("search").focus();}});

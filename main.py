@@ -100,6 +100,25 @@ def startup():
     else:
         _seed_data()  # still restores any bundled images that are missing
     db.init_db()
+    # Data hygiene: pull phone numbers out of ID-card notes, then remove any
+    # duplicate people so the master directory has each person exactly once.
+    try:
+        moved = db.backfill_phones()
+        removed = db.dedupe_all()
+        for _id, img in removed:
+            if img:
+                p = os.path.join(UPLOAD_DIR, img)
+                if os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
+        if moved or removed:
+            log.info("Startup cleanup: %s phone(s) backfilled, %s duplicate(s) removed",
+                     moved, len(removed))
+            db.backup_async(force=True)
+    except Exception:
+        log.exception("Startup cleanup failed (continuing)")
     worker.start_worker()
     _self_keepalive()
 
@@ -259,22 +278,40 @@ async def upload_cards(request: Request, background: BackgroundTasks, files: lis
             if len(content) > MAX_FILE_MB * 1024 * 1024:
                 raise ValueError("File too large (max {} MB)".format(MAX_FILE_MB))
 
-            # 1. Save image locally
+            # 1. Vision extraction first (so we can dedupe BEFORE storing anything)
+            b64 = base64.b64encode(content).decode("ascii")
+            extraction = ai.extract_with_vision(b64, mime)
+
+            # 2. Employee ID cards keep the number under "Emergency Contact" —
+            #    lift it into the mobile field so contacts/sheet always have it.
+            if not str(extraction.get("mobile") or "").strip():
+                ph = db.extract_phone(extraction.get("notes"), extraction.get("raw_summary"))
+                if ph:
+                    extraction["mobile"] = ph
+
+            # 3. Duplicate guard — same person already in the directory? Skip it.
+            dup_id = db.find_duplicate(extraction.get("full_name", ""),
+                                       extraction.get("company", ""),
+                                       extraction.get("mobile", ""))
+            if dup_id:
+                results.append({"ok": False, "duplicate": True, "id": dup_id,
+                                "name": extraction.get("full_name", ""),
+                                "error": "Duplicate record found — this person is already "
+                                         "in the directory (card #%s). Not added again." % dup_id})
+                continue
+
+            # 4. Save image locally
             safe_base = re.sub(r"[^a-zA-Z0-9_-]", "_", os.path.splitext(f.filename or "card")[0])[:40]
             fname = "{}_{}{}".format(int(time.time() * 1000), safe_base, ALLOWED_MIME[mime])
             with open(os.path.join(UPLOAD_DIR, fname), "wb") as out:
                 out.write(content)
             saved_images.append(os.path.join(UPLOAD_DIR, fname))
 
-            # 2. Vision extraction (fast, synchronous)
-            b64 = base64.b64encode(content).decode("ascii")
-            extraction = ai.extract_with_vision(b64, mime)
-
-            # 3. Insert into SQLite
+            # 5. Insert into SQLite
             card_id = db.insert_card(
                 datetime.now(timezone.utc).isoformat(), fname, extraction, owner_email=owner)
 
-            # 4. Enrichment in background (slow web research — don't block upload)
+            # 6. Enrichment in background (slow web research — don't block upload)
             background.add_task(worker.enrich_card_now, card_id)
 
             results.append({"ok": True, "id": card_id,
