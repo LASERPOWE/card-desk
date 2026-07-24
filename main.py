@@ -74,7 +74,13 @@ def _seed_data():
 
 @app.on_event("startup")
 def startup():
-    _seed_data()
+    # 1. Newest data first: restore the GitHub backup (every scan is pushed there)
+    restored = db.restore_from_backup(UPLOAD_DIR)
+    # 2. Fallback: bundled seed (original cards) if no backup existed
+    if not restored:
+        _seed_data()
+    else:
+        _seed_data()  # still restores any bundled images that are missing
     db.init_db()
     worker.start_worker()
 
@@ -224,6 +230,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 async def upload_cards(request: Request, background: BackgroundTasks, files: list[UploadFile] = File(...)):
     owner = _identity(request) or os.environ.get("APP_USERNAME", "admin")
     results = []
+    saved_images = []
     for f in files:
         try:
             mime = (f.content_type or "").lower()
@@ -238,6 +245,7 @@ async def upload_cards(request: Request, background: BackgroundTasks, files: lis
             fname = "{}_{}{}".format(int(time.time() * 1000), safe_base, ALLOWED_MIME[mime])
             with open(os.path.join(UPLOAD_DIR, fname), "wb") as out:
                 out.write(content)
+            saved_images.append(os.path.join(UPLOAD_DIR, fname))
 
             # 2. Vision extraction (fast, synchronous)
             b64 = base64.b64encode(content).decode("ascii")
@@ -256,6 +264,8 @@ async def upload_cards(request: Request, background: BackgroundTasks, files: lis
         except Exception as e:
             log.exception("Upload failed for %s", f.filename)
             results.append({"ok": False, "file": f.filename, "error": str(e)[:300]})
+    # Data safety: push DB + the new images to the GitHub backup immediately
+    db.backup_async(saved_images, force=True)
     return {"results": results}
 
 
@@ -303,4 +313,5 @@ def api_delete(card_id: int, request: Request):
         except OSError:
             pass
     db.delete_card(card_id)
+    db.backup_async(force=True)
     return {"ok": True}

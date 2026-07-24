@@ -167,6 +167,8 @@ def _loop():
                     enrich_card_now(row["id"])
                     time.sleep(SLEEP_BETWEEN_CALLS)
                 db.mark_exhausted(MAX_ATTEMPTS)
+                if rows:
+                    db.backup_now()  # research results persist too (throttled)
         except Exception:
             log.exception("Worker loop error")
         time.sleep(WORKER_INTERVAL)

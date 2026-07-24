@@ -1,16 +1,111 @@
-"""SQLite storage for Card Desk.
-
-DB lives under DATA_DIR when set (e.g. a mounted persistent disk on a host),
-otherwise next to this file (local-PC behaviour, unchanged).
+"""SQLite storage for Card Desk — with automatic GitHub backup/restore so data
+survives free-tier container restarts. Every write is pushed to the repo's
+backup/ folder (needs GITHUB_TOKEN env); on boot, the newest backup is restored.
 """
+import base64 as _b64
+import logging
 import os
 import sqlite3
+import threading
+import time as _time
 from contextlib import contextmanager
+
+import requests as _rq
+
+_blog = logging.getLogger("card-desk.backup")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.environ.get("DATA_DIR", BASE_DIR)
 os.makedirs(DATA_DIR, exist_ok=True)
 DB_PATH = os.path.join(DATA_DIR, "cards.db")
+
+# ── GitHub-backed persistence ────────────────────────────────────────────────
+BACKUP_REPO = os.environ.get("BACKUP_REPO", "LASERPOWE/card-desk")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
+_BK_LOCK = threading.Lock()
+_BK_LAST = 0.0
+
+
+def _gh_put(path, content_bytes, message):
+    """Create/update one file in the repo. Returns True on success."""
+    if not GITHUB_TOKEN:
+        return False
+    url = "https://api.github.com/repos/%s/contents/%s" % (BACKUP_REPO, path)
+    H = {"Authorization": "Bearer " + GITHUB_TOKEN,
+         "Accept": "application/vnd.github+json"}
+    sha = None
+    try:
+        r = _rq.get(url, headers=H, timeout=15)
+        if r.status_code == 200:
+            sha = r.json().get("sha")
+    except Exception:
+        pass
+    body = {"message": message, "content": _b64.b64encode(content_bytes).decode()}
+    if sha:
+        body["sha"] = sha
+    r = _rq.put(url, headers=H, json=body, timeout=45)
+    return r.status_code in (200, 201)
+
+
+def backup_now(image_paths=None, force=False):
+    """Push cards.db (+ any new card images) to GitHub. Throttled to 1/min
+    unless force. Never raises — data safety must not break the app."""
+    global _BK_LAST
+    if not GITHUB_TOKEN:
+        return
+    with _BK_LOCK:
+        if not force and _time.time() - _BK_LAST < 60:
+            return
+        try:
+            with open(DB_PATH, "rb") as f:
+                if _gh_put("backup/cards.db", f.read(), "auto-backup: cards.db"):
+                    _BK_LAST = _time.time()
+                    _blog.info("DB backed up to GitHub")
+            for p in (image_paths or []):
+                try:
+                    with open(p, "rb") as f:
+                        _gh_put("backup/uploads/" + os.path.basename(p), f.read(),
+                                "auto-backup: card image")
+                except Exception:
+                    _blog.exception("image backup failed: %s", p)
+        except Exception:
+            _blog.exception("backup failed (continuing)")
+
+
+def backup_async(image_paths=None, force=False):
+    threading.Thread(target=backup_now, args=(image_paths, force), daemon=True).start()
+
+
+def restore_from_backup(upload_dir):
+    """On boot: if there is no live DB, pull the newest backup from GitHub
+    (public raw for the DB, API listing for images). Never raises."""
+    try:
+        if os.path.exists(DB_PATH):
+            return False
+        base = "https://raw.githubusercontent.com/%s/main/backup/" % BACKUP_REPO
+        r = _rq.get(base + "cards.db", timeout=25)
+        if r.status_code != 200 or not r.content.startswith(b"SQLite"):
+            return False
+        with open(DB_PATH, "wb") as f:
+            f.write(r.content)
+        _blog.info("Restored cards.db from GitHub backup")
+        try:
+            idx = _rq.get("https://api.github.com/repos/%s/contents/backup/uploads" % BACKUP_REPO,
+                          timeout=25)
+            if idx.status_code == 200:
+                for it in idx.json():
+                    dest = os.path.join(upload_dir, it.get("name", ""))
+                    if it.get("download_url") and not os.path.exists(dest):
+                        d = _rq.get(it["download_url"], timeout=40)
+                        if d.status_code == 200:
+                            with open(dest, "wb") as f:
+                                f.write(d.content)
+        except Exception:
+            _blog.exception("image restore failed (continuing)")
+        return True
+    except Exception:
+        _blog.exception("restore failed (continuing)")
+        return False
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cards (
