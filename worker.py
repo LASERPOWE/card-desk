@@ -63,6 +63,19 @@ def open_source_lookup(company, website):
             sources.append(url)
     except Exception:
         pass
+    try:  # 4. Top open-web pages about the company (DuckDuckGo organic results)
+        if company:
+            r = requests.get("https://html.duckduckgo.com/html/",
+                             params={"q": '"%s"' % company}, headers=ua, timeout=8)
+            links = []
+            for enc in re.findall(r'uddg=([^&"]+)', r.text)[:8]:
+                u = urllib.parse.unquote(enc).split("&")[0]
+                if u.startswith("http") and "duckduckgo" not in u:
+                    links.append(u)
+            if links:
+                out["_links"] = list(dict.fromkeys(links))[:4]
+    except Exception:
+        pass
     if sources:
         out["_sources"] = " | ".join(dict.fromkeys(sources))[:500]
     return out
@@ -252,11 +265,13 @@ def enrich_card_now(card_id):
                 u = u.strip()
                 if u.startswith("http"):
                     refs.append(u)
+            refs.extend(extra.get("_links") or [])
             w = str(card.get("website", "") or "").strip()
             if w:
                 refs.append(w if w.startswith("http") else "https://" + w)
             if refs:
-                data["other_web_profiles"] = "\n".join(dict.fromkeys(refs))[:900]
+                data["other_web_profiles"] = "\n".join(
+                    "Company: " + u for u in dict.fromkeys(refs))[:900]
     except Exception:
         log.exception("open_source_lookup failed (continuing)")
 

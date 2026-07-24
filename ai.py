@@ -142,6 +142,9 @@ TASKS:
    Crunchbase: <url>
    News: <url>
    Only URLs actually seen in search results - never guess or invent handles.
+   If NO personal profiles are found, list instead the best pages about the
+   person's COMPANY that you actually found (official site, about page, news,
+   directories), labelled like:  Company: <url>  |  News: <url>
 7. enrich_sources - URLs you actually used, comma-separated.
 
 RULES: Every fact must come from live search results - never invent.
@@ -231,10 +234,12 @@ def parse_and_validate(raw_text):
     if photo and not is_valid_photo_url(photo):
         photo = ""
 
+    # Keep every line that CONTAINS a real URL — labelled lines like
+    # "Facebook: https://…" must survive (the old check deleted them all).
     others = _to_str(parsed.get("other_web_profiles"))
     others_clean = "\n".join(
-        u.strip() for u in re.split(r"[\n,]", others)
-        if u.strip() and is_valid_http_url(u.strip())
+        u.strip() for u in others.split("\n")
+        if u.strip() and re.search(r"https?://\S+\.\S+", u)
     )
 
     return {
